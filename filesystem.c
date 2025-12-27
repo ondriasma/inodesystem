@@ -66,16 +66,34 @@ void save_bitmaps(filesystem_t *fs) {
     write_bytes(fs, fs->sb.bitmap_start, fs->data_bitmap, data_bitmap_size);
 }
 
-bool is_bit_set(uint8_t *bitmap, int32_t index) {
-    return (bitmap[index / 8] & (1 << (index % 8))) != 0;
+bool is_bit_set(uint8_t *bitmap, int32_t index){
+    int32_t byte_index = index / 8;
+    int32_t bit_index  = index % 8;
+
+    uint8_t mask = (1 << bit_index);
+
+    return (bitmap[byte_index] & mask) != 0;
 }
 
-void set_bit(uint8_t *bitmap, int32_t index) {
-    bitmap[index / 8] |= (1 << (index % 8));
+
+void set_bit(uint8_t *bitmap, int32_t index)
+{
+    int32_t byte_index = index / 8;
+    int32_t bit_index  = index % 8;
+
+    uint8_t mask = (1 << bit_index);
+
+    bitmap[byte_index] |= mask;
 }
 
-void clear_bit(uint8_t *bitmap, int32_t index) {
-    bitmap[index / 8] &= ~(1 << (index % 8));
+void clear_bit(uint8_t *bitmap, int32_t index)
+{
+    int32_t byte_index = index / 8;
+    int32_t bit_index  = index % 8;
+
+    uint8_t mask = (1 << bit_index);
+
+    bitmap[byte_index] &= ~mask;
 }
 
 
@@ -184,8 +202,7 @@ bool add_to_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name, int32_
 }
 
 
-// Resolve a path (handles ., .., /, and relative paths)
-// Returns the inode number of the final destination, or -1 on error
+
 int32_t resolve_path(filesystem_t *fs, const char *path) {
     printf("[DEBUG] resolve_path: '%s'\n", path);
     

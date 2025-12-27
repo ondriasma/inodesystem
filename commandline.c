@@ -11,9 +11,6 @@
 #include "filesystem.h"
 
 
-// ============================================================================
-// COMMANDS
-// ============================================================================
 
 void pwd(filesystem_t *fs) {
     printf("%s\n", fs->current_path);
@@ -247,13 +244,15 @@ bool cd(filesystem_t *fs, const char *path) {
         return false;
     }
     
-    // test, jestli se vůbec jedná o složku
+    // načtení i-uzlu cílové složky
     inode_t target;
     if (!read_inode(fs, target_inode, &target)) {
         printf("PATH NOT FOUND\n");
         return false;
     }
-    
+
+
+    // test, jestli se vůbec jedná o složku
     if (!target.is_directory) {
         printf("PATH NOT FOUND\n");
         return false;
@@ -265,26 +264,21 @@ bool cd(filesystem_t *fs, const char *path) {
         strcpy(fs->current_path, "/");
     }
 
-    // 2. We need a copy because strtok modifies the string
+
     char path_copy[256];
     strncpy(path_copy, path, sizeof(path_copy) - 1);
     
     char *token = strtok(path_copy, "/");
     while (token != NULL) {
-        // We pass the filesystem's path and the individual "step" (token)
+        // aktualizace cesty po zpracování každého tokenu
         update_path(fs->current_path, token); 
         token = strtok(NULL, "/");
     }
 
 
+    //aktualizace adresáře ve filesysztému
     fs->current_inode = target_inode;
-    
-/*
-    if (strcmp(fs->current_path, "/") != 0) {
-        strcat(fs->current_path, "/");
-    }
-    strcat(fs->current_path, path);
-*/    
+        
     printf("OK\n");
     return true;
 }
@@ -359,35 +353,31 @@ void statfs(filesystem_t *fs) {
     }
     
     int32_t free_inodes = fs->sb.inode_count - used_inodes;
-    int32_t free_clusters = fs->sb.cluster_count - 1 - used_clusters;  // -1 for reserved cluster 0
+    int32_t free_clusters = fs->sb.cluster_count - 1 - used_clusters;
     
-    printf("Filesystem Statistics:\n");
+    printf("Statfs:\n");
     printf("----------------------\n");
-    printf("Disk size:        %d bytes (%.2f MB)\n", 
-           fs->sb.disk_size, fs->sb.disk_size / (1024.0 * 1024.0));// todo - asi by stačily MB
-    printf("Cluster size:     %d bytes\n", fs->sb.cluster_size);
-    printf("Total clusters:   %d\n", fs->sb.cluster_count - 1);  // Don't count reserved
-    printf("Used clusters:    %d\n", used_clusters);
-    printf("Free clusters:    %d\n", free_clusters);
-    printf("Total inodes:     %d\n", fs->sb.inode_count);
-    printf("Used inodes:      %d\n", used_inodes);
-    printf("Free inodes:      %d\n", free_inodes);
-    printf("Directories:      %d\n", dir_count);
+    printf("Velikost disku:        %.2f MB\n", fs->sb.disk_size / (1024.0 * 1024.0));      
+    printf("Velikost clusteru:     %d bytů\n", fs->sb.cluster_size);
+    printf("Počet clusterů:   %d\n", fs->sb.cluster_count - 1);
+    printf("Obsazené clustery:    %d\n", used_clusters);
+    printf("Volné clustery:    %d\n", free_clusters);
+    printf("Počet inodů:     %d\n", fs->sb.inode_count);
+    printf("Obsazené inody:      %d\n", used_inodes);
+    printf("Volné inody:      %d\n", free_inodes);
+    printf("Počet složek:      %d\n", dir_count);
     
     // výpočet použitého místa
     int32_t data_space = (fs->sb.cluster_count - 1) * fs->sb.cluster_size;
     int32_t used_space = used_clusters * fs->sb.cluster_size;
     int32_t free_space = free_clusters * fs->sb.cluster_size;
     
-    printf("\nSpace Utilization:\n");
-    printf("Total data space: %d bytes (%.2f MB)\n", 
-           data_space, data_space / (1024.0 * 1024.0));
-    printf("Used space:       %d bytes (%.2f MB)\n", 
-           used_space, used_space / (1024.0 * 1024.0));
-    printf("Free space:       %d bytes (%.2f MB)\n", 
-           free_space, free_space / (1024.0 * 1024.0));
-    printf("Usage:            %.1f%%\n", 
-           (used_clusters * 100.0) / (fs->sb.cluster_count - 1));
+    printf("\nPoužití místa:\n");
+    printf("Celkové místo: %.2f MB\n", data_space / (1024.0 * 1024.0));        
+    printf("Obsazené místo:       %.2f MB\n", used_space / (1024.0 * 1024.0));    
+    printf("Volné místo:       %.2f MB\n", free_space / (1024.0 * 1024.0)); 
+    printf("Obsazenost:            %.1f%%\n", (used_clusters * 100.0) / (fs->sb.cluster_count - 1));
+           
 }
 
 
@@ -421,10 +411,10 @@ bool info(filesystem_t *fs, const char *path) {
     filename[sizeof(filename) - 1] = '\0';
     
 // Výpis veškerých informací o souboru
-    printf("%s - %d B - i-node %d - ", filename, inode.file_size, inode_id);
+    printf("%s - Velikost: %d B - i-node %d - ", filename, inode.file_size, inode_id);
     
     bool has_direct = false;
-    printf("direct links: ");
+    printf("přímé odkazy: ");
     if (inode.direct1 > 0) { printf("%d", inode.direct1); has_direct = true; }
     if (inode.direct2 > 0) { printf(", %d", inode.direct2); has_direct = true; }
     if (inode.direct3 > 0) { printf(", %d", inode.direct3); has_direct = true; }
@@ -432,12 +422,12 @@ bool info(filesystem_t *fs, const char *path) {
     if (inode.direct5 > 0) { printf(", %d", inode.direct5); has_direct = true; }
     
     if (!has_direct) {
-        printf("none");
+        printf("žádné");
     }
     
     if (inode.indirect1 > 0) {
-        printf("Indirect1 block: %d\n", inode.indirect1);
-        printf("  -> Data clusters: ");
+        printf("1. Nepřímý blok: %d\n", inode.indirect1);
+        printf("  -> Clustery: ");
         
         int32_t pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, inode.indirect1, pointers);
@@ -463,14 +453,14 @@ bool info(filesystem_t *fs, const char *path) {
         }
         
         if (total > 10) {
-            printf(", ... (%d more)", total - 10);
+            printf(", ... (%d dalších)", total - 10);
         }
         printf("\n");
     }
     
     if (inode.indirect2 > 0) {
-        printf("Indirect2 block: %d (double indirect)\n", inode.indirect2);
-        // Could expand this to show L1 and L2 structure
+        printf("2. Nepřímý blok: %d\n", inode.indirect2);
+        // TODO - výpis obsahu 2. nepřímého bloku
     }
     
     printf("\n");
@@ -495,13 +485,13 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
         return false;
     }
     
-    // jedná se skutečně o soubor
+    // jedná se skutečně o soubor, ne o adresář
     if (src_inode.is_directory) {
         printf("FILE NOT FOUND\n");
         return false;
     }
     
-    //Načtení do paměti
+    //Alokace a načtení dat z clusterů do paměti
     uint8_t *file_data = malloc(src_inode.file_size);
     if (!file_data) {
         printf("CANNOT CREATE FILE\n");
@@ -511,7 +501,7 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
     int32_t bytes_read = 0;
     int32_t clusters_needed = (src_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
     uint8_t buffer[CLUSTER_SIZE];
-    
+    //přečtení clusterů a kopírování do paměti
     for (int32_t i = 0; i < clusters_needed; i++) {
         int32_t cluster = get_file_cluster(fs, &src_inode, i);
         if (cluster == 0) break;
@@ -556,34 +546,34 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
         strncpy(dest_filename, filename, NAME_SIZE - 1);
         dest_filename[NAME_SIZE - 1] = '\0';
     } else {
-        // No directory component - use current directory
+        //aktuální adresář
         parent_inode = fs->current_inode;
         strncpy(dest_filename, dest_path, NAME_SIZE - 1);
         dest_filename[NAME_SIZE - 1] = '\0';
     }
     
+    // Kontrola, zda cílový soubor neexistuje
     if (find_in_dir(fs, parent_inode, dest_filename) >= 0) {
         free(file_data);
         printf("DESTINATION ALREADY EXISTS\n");
         return false;
     }
     
-    // Allocate inode for destination
-    int32_t dst_inode_id = alloc_inode(fs);
-    if (dst_inode_id < 0) {
+    //Alokace a vytvoření i-uzlu
+    int32_t dest_inode_id = alloc_inode(fs);
+    if (dest_inode_id < 0) {
         free(file_data);
         printf("CANNOT CREATE FILE\n");
         return false;
     }
     
-    // Create destination inode
     inode_t dest_inode = {0};
-    dest_inode.nodeid = dst_inode_id;
+    dest_inode.nodeid = dest_inode_id;
     dest_inode.is_directory = false;
     dest_inode.references = 1;
     dest_inode.file_size = src_inode.file_size;
     
-    // Write file data to new clusters
+    //Zapsání dat do alokovaných clusterů
     clusters_needed = (src_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
     for (int32_t i = 0; i < clusters_needed; i++) {
         int32_t cluster = alloc_cluster(fs);
@@ -605,11 +595,11 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
         set_file_cluster(fs, &dest_inode, i, cluster);
     }
     
-    // Write destination inode
-    write_inode(fs, dst_inode_id, &dest_inode);
+
+    write_inode(fs, dest_inode_id, &dest_inode);
     
-    // Add to parent directory
-    if (add_to_dir(fs, parent_inode, dest_filename, dst_inode_id) == false) {
+    //přidání do adresáře
+    if (add_to_dir(fs, parent_inode, dest_filename, dest_inode_id) == false) {
         free(file_data);
         printf("PATH NOT FOUND\n");
         return false;

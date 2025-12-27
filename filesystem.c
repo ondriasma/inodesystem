@@ -224,19 +224,9 @@ int32_t resolve_path(filesystem_t *fs, const char *path) {
         
         //".." -> přesun do rodičovské složky
         if (strcmp(token, "..") == 0) {
-            
-            int32_t parent = find_in_dir(fs, current, "..");
-            if (parent < 0) {
-                // If no ".." entry, stay at root
-                if (current == 0) {
-                    token = strtok(NULL, "/");
-                    continue;
-                }
-                // Otherwise, we can't go up
-                printf("[DEBUG]   Cannot find parent\n");
-                return -1;
-            }
-            current = parent;
+            inode_t node;
+            if (!read_inode(fs, current, &node)) return -1;
+            current = node.parent; // Directly move to parent
             token = strtok(NULL, "/");
             continue;
         }
@@ -252,6 +242,29 @@ int32_t resolve_path(filesystem_t *fs, const char *path) {
         token = strtok(NULL, "/");
     }
     
+    printf("[DEBUG]   Path copy: %s\n", path_copy);
     printf("[DEBUG]   Final inode: %d\n", current);
     return current;
+}
+
+
+void update_path(char *current_path, const char *input) {
+    if (strcmp(input, "..") == 0) {
+        char *last_slash = strrchr(current_path, '/');
+        if (last_slash != NULL) {
+            if (last_slash == current_path) {
+                //jedná se o root adresář
+                current_path[1] = '\0';
+            } else {
+                //odstranění posledního adresáře
+                *last_slash = '\0';
+            }
+        }
+    } else if (strcmp(input, ".") != 0) {
+        //pokud nekončí lomítkem, přidáme ho se jménem adresáře
+        if (current_path[strlen(current_path) - 1] != '/') {
+            strcat(current_path, "/");
+        }
+        strcat(current_path, input);
+    }
 }

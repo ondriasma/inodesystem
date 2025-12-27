@@ -34,3 +34,6 @@ int32_t find_in_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name);
 bool add_to_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name, int32_t inode_id);
 
 int32_t resolve_path(filesystem_t *fs, const char *path);
+
+//Upravuje výslednou cestu zadanou uživatelem
+void update_path(char *current_path, const char *input);

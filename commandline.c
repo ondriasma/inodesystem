@@ -84,6 +84,7 @@ bool mkdir(filesystem_t *fs, const char *name) {
     new_inode.is_directory = true;
     new_inode.references = 1;
     new_inode.file_size = 0;
+    new_inode.parent = fs->current_inode;
     write_inode(fs, new_inode_id, &new_inode);
     
     printf("[DEBUG] Wrote inode %d, calling add_to_dir\n", new_inode_id);
@@ -92,7 +93,7 @@ bool mkdir(filesystem_t *fs, const char *name) {
         printf("PATH NOT FOUND\n");
         return false;
     }
-    
+
     printf("[DEBUG] add_to_dir completed successfully\n");
     
     // Verify it was added by reading back the parent directory TODO smazat
@@ -161,7 +162,7 @@ bool incp(filesystem_t *fs, const char *src, const char *dst) {
 }
 
 bool format(filesystem_t *fs, const char *size_str) {
-    int32_t size_mb = 600;
+    int32_t size_mb = 600;//todo
     if (size_str && size_str[0]) {
         sscanf(size_str, "%dMB", &size_mb);
     }
@@ -176,7 +177,7 @@ bool format(filesystem_t *fs, const char *size_str) {
     
     memset(&fs->sb, 0, sizeof(superblock_t));
     strcpy(fs->sb.signature, SIGNATURE);
-    strcpy(fs->sb.description, "ZOS Filesystem 2025");//todo - upravit
+    strcpy(fs->sb.description, "ZOS Inodesystem");
     fs->sb.disk_size = total_size;
     fs->sb.cluster_size = CLUSTER_SIZE;
     fs->sb.cluster_count = cluster_count;
@@ -203,6 +204,7 @@ bool format(filesystem_t *fs, const char *size_str) {
     root.nodeid = root_id;
     root.is_directory = true;
     root.references = 1;
+    root.parent = root_id;
 
     bool b = write_inode(fs, root_id, &root);
     printf("[DEBUG] format: write_inode returned %s\n", b ? "true" : "false");
@@ -228,6 +230,7 @@ bool format(filesystem_t *fs, const char *size_str) {
 }
 
 
+
 bool cd(filesystem_t *fs, const char *path) {
     if (strcmp(path, "/") == 0) {  // jedná se o root složku
         fs->current_inode = 0; 
@@ -237,7 +240,7 @@ bool cd(filesystem_t *fs, const char *path) {
     }
     
     // hledání cílové složky
-    int32_t target_inode = find_in_dir(fs, fs->current_inode, path);
+    int32_t target_inode = resolve_path(fs, path);
     
     if (target_inode < 0) {
         printf("PATH NOT FOUND\n");
@@ -257,14 +260,31 @@ bool cd(filesystem_t *fs, const char *path) {
     }
     
 
+    // absolutní cesta, začínáme od rootu
+    if (path[0] == '/') {
+        strcpy(fs->current_path, "/");
+    }
+
+    // 2. We need a copy because strtok modifies the string
+    char path_copy[256];
+    strncpy(path_copy, path, sizeof(path_copy) - 1);
+    
+    char *token = strtok(path_copy, "/");
+    while (token != NULL) {
+        // We pass the filesystem's path and the individual "step" (token)
+        update_path(fs->current_path, token); 
+        token = strtok(NULL, "/");
+    }
+
+
     fs->current_inode = target_inode;
     
-
+/*
     if (strcmp(fs->current_path, "/") != 0) {
         strcat(fs->current_path, "/");
     }
     strcat(fs->current_path, path);
-    
+*/    
     printf("OK\n");
     return true;
 }

@@ -32,6 +32,7 @@ typedef struct {
     bool is_directory;          //soubor, nebo adresar
     int8_t references;          //počet odkazů na i-uzel, používá se pro hardlinky
     int32_t file_size;          //velikost souboru v bytech
+    int32_t parent;
     int32_t direct1;            // 1. přímý odkaz na datové bloky
     int32_t direct2;            // 2. přímý odkaz na datové bloky
     int32_t direct3;            // 3. přímý odkaz na datové bloky

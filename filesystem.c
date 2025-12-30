@@ -315,3 +315,35 @@ bool remove_from_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name) {
     
     return false;
 }
+
+
+
+bool split_path(filesystem_t *fs, const char *path, int32_t *parent_inode, char *filename) {
+    if (!path || !path[0]) return false;
+
+    char path_copy[256];
+    strncpy(path_copy, path, sizeof(path_copy) - 1);
+    path_copy[sizeof(path_copy) - 1] = '\0';
+
+    char *last_slash = strrchr(path_copy, '/');
+
+    if (last_slash) {
+        char *name = last_slash + 1;
+        if (last_slash == path_copy) {
+            //root adresář
+            *parent_inode = 0; 
+        } else {
+            //escape charakter - ukončení řetězce, path_copy nevidí jméno souboru
+            *last_slash = '\0';
+            *parent_inode = resolve_path(fs, path_copy);
+        }
+        if (*parent_inode < 0) return false;
+        strncpy(filename, name, NAME_SIZE - 1);
+    } else {
+        //pouze jméno souboru, pracujeme v aktuálním adresáři
+        *parent_inode = fs->current_inode;
+        strncpy(filename, path, NAME_SIZE - 1);
+    }
+    filename[NAME_SIZE - 1] = '\0';
+    return true;
+}

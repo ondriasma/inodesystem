@@ -49,3 +49,6 @@ void update_path(char *current_path, const char *input);
 
 //Odebere položku z adresáře
 bool remove_from_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name);
+
+//Rozdělí cestu na rodičovský inode a jméno souboru/adresáře
+bool split_path(filesystem_t *fs, const char *path, int32_t *out_parent_inode, char *out_name);

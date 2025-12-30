@@ -104,6 +104,15 @@ bool mkdir(filesystem_t *fs, const char *name) {
 }
 
 bool incp(filesystem_t *fs, const char *src, const char *dest) {
+    int32_t dest_parent_id;
+    char clean_filename[NAME_SIZE];
+
+    if (!split_path(fs, dest, &dest_parent_id, clean_filename)) {
+        printf("PATH NOT FOUND\n");
+        return false;
+    }
+
+
     FILE *f = fopen(src, "rb");
     if (!f) {
         printf("FILE NOT FOUND\n");
@@ -150,8 +159,18 @@ bool incp(filesystem_t *fs, const char *src, const char *dest) {
         set_file_cluster(fs, &new_inode, i, cluster);
     }
     
+    
+
+
+
     write_inode(fs, new_inode_id, &new_inode);
-    add_to_dir(fs, fs->current_inode, dest, new_inode_id);
+
+
+    if (!add_to_dir(fs, dest_parent_id, clean_filename, new_inode_id)) {
+        printf("PATH NOT FOUND\n");
+        free(data);
+        return false;
+    }
     
     free(data);
     printf("OK\n");
@@ -518,42 +537,21 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
     }
     
 //Vytvoření cílového souboru
-    char dest_copy[256];
-    strncpy(dest_copy, dest_path, sizeof(dest_copy) - 1);
-    dest_copy[sizeof(dest_copy) - 1] = '\0';
+    //char dest_copy[256];
+    //strncpy(dest_copy, dest_path, sizeof(dest_copy) - 1);
+    //dest_copy[sizeof(dest_copy) - 1] = '\0';
     
-    char *last_slash = strrchr(dest_copy, '/');
-    int32_t parent_inode;
+    
+    int32_t dest_parent;
     char dest_filename[NAME_SIZE];
     
-    if (last_slash) {
-        // Has directory component
-        *last_slash = '\0';
-        char *filename = last_slash + 1;
-        
-        if (dest_copy[0] == '\0') {
-            // Was "/filename"
-            parent_inode = 0;
-        } else {
-            parent_inode = resolve_path(fs, dest_copy);
-            if (parent_inode < 0) {
-                free(file_data);
-                printf("PATH NOT FOUND\n");
-                return false;
-            }
-        }
-        
-        strncpy(dest_filename, filename, NAME_SIZE - 1);
-        dest_filename[NAME_SIZE - 1] = '\0';
-    } else {
-        //aktuální adresář
-        parent_inode = fs->current_inode;
-        strncpy(dest_filename, dest_path, NAME_SIZE - 1);
-        dest_filename[NAME_SIZE - 1] = '\0';
+    if (!split_path(fs, dest_path, &dest_parent, dest_filename)) {
+        printf("PATH NOT FOUND\n");
+        return false;
     }
     
     // Kontrola, zda cílový soubor neexistuje
-    if (find_in_dir(fs, parent_inode, dest_filename) >= 0) {
+    if (find_in_dir(fs, dest_parent, dest_filename) >= 0) {
         free(file_data);
         printf("DESTINATION ALREADY EXISTS\n");
         return false;
@@ -599,7 +597,7 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
     write_inode(fs, dest_inode_id, &dest_inode);
     
     //přidání do adresáře
-    if (add_to_dir(fs, parent_inode, dest_filename, dest_inode_id) == false) {
+    if (add_to_dir(fs, dest_parent, dest_filename, dest_inode_id) == false) {
         free(file_data);
         printf("PATH NOT FOUND\n");
         return false;
@@ -689,30 +687,15 @@ bool rm(filesystem_t *fs, const char *path) {
     
 
     // zjištění jména souboru a cílového umístění
-    char path_copy[256];
-    strncpy(path_copy, path, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
     
-    char *last_slash = strrchr(path_copy, '/');
+    
+    
     int32_t parent_inode;
     char filename[NAME_SIZE];
     
-    if (last_slash) {
-        *last_slash = '\0';
-        char *name = last_slash + 1;
-        
-        if (path_copy[0] == '\0') {
-            parent_inode = 0;  //root adresář
-        } else {
-            parent_inode = resolve_path(fs, path_copy);
-        }
-        
-        strncpy(filename, name, NAME_SIZE - 1);
-        filename[NAME_SIZE - 1] = '\0';
-    } else {
-        parent_inode = fs->current_inode;
-        strncpy(filename, path, NAME_SIZE - 1);
-        filename[NAME_SIZE - 1] = '\0';
+    if (!split_path(fs, path, &parent_inode, filename)) {
+        printf("FILE NOT FOUND\n");
+        return false;
     }
     
     // odstranění z nadřazeného adresáře
@@ -789,30 +772,17 @@ bool rmdir(filesystem_t *fs, const char *path) {
     save_bitmaps(fs);
     
     //odstranění záznamu - zjištění jména a nadřazeného adresáře
-    char path_copy[256];
-    strncpy(path_copy, path, sizeof(path_copy) - 1);
-    path_copy[sizeof(path_copy) - 1] = '\0';
+    //char path_copy[256];
+    //strncpy(path_copy, path, sizeof(path_copy) - 1);
+    //path_copy[sizeof(path_copy) - 1] = '\0';
     
-    char *last_slash = strrchr(path_copy, '/');
+    
     int32_t parent_inode;
     char dirname[NAME_SIZE];
     
-    if (last_slash) {
-        *last_slash = '\0';
-        char *name = last_slash + 1;
-        
-        if (path_copy[0] == '\0') {
-            parent_inode = 0;
-        } else {
-            parent_inode = resolve_path(fs, path_copy);
-        }
-        
-        strncpy(dirname, name, NAME_SIZE - 1);
-        dirname[NAME_SIZE - 1] = '\0';
-    } else {
-        parent_inode = fs->current_inode;
-        strncpy(dirname, path, NAME_SIZE - 1);
-        dirname[NAME_SIZE - 1] = '\0';
+    if (!split_path(fs, path, &parent_inode, dirname)) {
+        printf("FILE NOT FOUND\n");
+        return false;
     }
     
     if (!remove_from_dir(fs, parent_inode, dirname)) {
@@ -827,139 +797,54 @@ bool rmdir(filesystem_t *fs, const char *path) {
 
 
 bool mv(filesystem_t *fs, const char *src_path, const char *dest_path) {
-    if (!src_path || !src_path[0] || !dest_path || !dest_path[0]) {
-        printf("FILE NOT FOUND\n");
-        return false;
-    }
-    
-    int32_t src_inode_id = resolve_path(fs, src_path);
-    
-    if (src_inode_id < 0) {
-        printf("FILE NOT FOUND\n");
-        return false;
-    }
-    
+    int32_t src_parent, src_id;
+    char src_name[NAME_SIZE];
 
-    if (src_inode_id == 0) {
+    if (!split_path(fs, src_path, &src_parent, src_name)) {
         printf("FILE NOT FOUND\n");
         return false;
     }
-    
-    inode_t src_inode;
-    if (!read_inode(fs, src_inode_id, &src_inode)) {
-        printf("FILE NOT FOUND\n");
-        return false;
-    }
-    
-    //získání jména souboru a nadřazeného adresáře
-    char src_copy[256];
-    strncpy(src_copy, src_path, sizeof(src_copy) - 1);
-    src_copy[sizeof(src_copy) - 1] = '\0';
-    
-    char *last_slash = strrchr(src_copy, '/');
-    int32_t src_parent_inode;
-    char src_filename[NAME_SIZE];
-    
-    if (last_slash) {
-        *last_slash = '\0';
-        char *name = last_slash + 1;
-        
-        if (src_copy[0] == '\0') {
-            src_parent_inode = 0;
-        } else {
-            src_parent_inode = resolve_path(fs, src_copy);
-            if (src_parent_inode < 0) {
-                printf("FILE NOT FOUND\n");
-                return false;
-            }
-        }
-        
-        strncpy(src_filename, name, NAME_SIZE - 1);
-        src_filename[NAME_SIZE - 1] = '\0';
-    } else {
-        src_parent_inode = fs->current_inode;
-        strncpy(src_filename, src_path, NAME_SIZE - 1);
-        src_filename[NAME_SIZE - 1] = '\0';
-    }
-    
 
-    int32_t dest_check = resolve_path(fs, dest_path);
+    src_id = find_in_dir(fs, src_parent, src_name);
+    if (src_id <= 0) { // Protect root
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+
     int32_t dest_parent;
-    char dest_filename[NAME_SIZE];
-    
+    char dest_name[NAME_SIZE];
+
+    //KOntrola, zda cílová cesta již existuje
+    int32_t dest_check = resolve_path(fs, dest_path);
     if (dest_check >= 0) {
-        //přesun do již existující složky
-        inode_t dest_check_inode;
-        if (!read_inode(fs, dest_check, &dest_check_inode)) {
-            printf("PATH NOT FOUND\n");
-            return false;
-        }
-        
-        if (dest_check_inode.is_directory) {
+        inode_t d_node;
+        read_inode(fs, dest_check, &d_node);
+        if (d_node.is_directory) {
             dest_parent = dest_check;
-            strncpy(dest_filename, src_filename, NAME_SIZE - 1);
-            dest_filename[NAME_SIZE - 1] = '\0';
-            
-            //soubor už v cílovém adresáři existuje
-            if (find_in_dir(fs, dest_parent, dest_filename) >= 0) {
-                printf("FILE ALREADY EXISTS\n");
-                return false;
-            }
+            strcpy(dest_name, src_name);
         } else {
-            //argument dest_path není složka
-            printf("FILE NOT FOUND\n");
+            printf("FILE ALREADY EXISTS\n");
             return false;
         }
     } else {
-        //nová cesta - zjištění jména nového souboru a nadřazeného adresáře
-        char dest_copy[256];
-        strncpy(dest_copy, dest_path, sizeof(dest_copy) - 1);
-        dest_copy[sizeof(dest_copy) - 1] = '\0';
-        
-        char *last_slash = strrchr(dest_copy, '/');
-        if (last_slash) {
-            *last_slash = '\0';
-            char *name = last_slash + 1;
-            
-            if (dest_copy[0] == '\0') {
-                dest_parent = 0;
-            } else {
-                dest_parent = resolve_path(fs, dest_copy);
-                if (dest_parent < 0) {
-                    printf("PATH NOT FOUND\n");
-                    return false;
-                }
-            }
-            
-            strncpy(dest_filename, name, NAME_SIZE - 1);
-            dest_filename[NAME_SIZE - 1] = '\0';
-        } else {
-            dest_parent = fs->current_inode;
-            strncpy(dest_filename, dest_path, NAME_SIZE - 1);
-            dest_filename[NAME_SIZE - 1] = '\0';
-        }
-        
-        // Ověření, že se jedná o složku
-        inode_t dest_parent_inode;
-        if (!read_inode(fs, dest_parent, &dest_parent_inode) || !dest_parent_inode.is_directory) {
+        if (!split_path(fs, dest_path, &dest_parent, dest_name)) {
             printf("PATH NOT FOUND\n");
             return false;
         }
     }
-    
-    //Odebrání z předchozí složky a přidání do nové
-    if (!remove_from_dir(fs, src_parent_inode, src_filename)) {
-        printf("FILE NOT FOUND\n");
-        return false;
-    }
-    
 
-    if (!add_to_dir(fs, dest_parent, dest_filename, src_inode_id)) {
-        add_to_dir(fs, src_parent_inode, src_filename, src_inode_id);
-        printf("PATH NOT FOUND\n");
+    if (find_in_dir(fs, dest_parent, dest_name) >= 0) {
+        printf("FILE ALREADY EXISTS\n");
         return false;
     }
-    
-    printf("OK\n");
-    return true;
+
+    if (remove_from_dir(fs, src_parent, src_name)) {
+        add_to_dir(fs, dest_parent, dest_name, src_id);
+        printf("OK\n");
+        return true;
+    }
+    return false;
 }
+
+
+

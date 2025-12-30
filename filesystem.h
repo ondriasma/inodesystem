@@ -46,3 +46,6 @@ int32_t resolve_path(filesystem_t *fs, const char *path);
 
 //Upravuje výslednou cestu zadanou uživatelem
 void update_path(char *current_path, const char *input);
+
+//Odebere položku z adresáře
+bool remove_from_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name);

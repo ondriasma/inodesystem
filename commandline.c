@@ -103,7 +103,7 @@ bool mkdir(filesystem_t *fs, const char *name) {
     return true;
 }
 
-bool incp(filesystem_t *fs, const char *src, const char *dst) {
+bool incp(filesystem_t *fs, const char *src, const char *dest) {
     FILE *f = fopen(src, "rb");
     if (!f) {
         printf("FILE NOT FOUND\n");
@@ -151,7 +151,7 @@ bool incp(filesystem_t *fs, const char *src, const char *dst) {
     }
     
     write_inode(fs, new_inode_id, &new_inode);
-    add_to_dir(fs, fs->current_inode, dst, new_inode_id);
+    add_to_dir(fs, fs->current_inode, dest, new_inode_id);
     
     free(data);
     printf("OK\n");
@@ -606,6 +606,360 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
     }
     
     free(file_data);
+    printf("OK\n");
+    return true;
+}
+
+
+bool rm(filesystem_t *fs, const char *path) {
+    if (!path || !path[0]) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //nalezení inodu souboru
+    int32_t file_inode_id = resolve_path(fs, path);
+    
+    if (file_inode_id < 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    inode_t file_inode;
+    if (!read_inode(fs, file_inode_id, &file_inode)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //jedná se o adresář - špatný příkaz
+    if (file_inode.is_directory) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //Uvolnění clusteru a všech obsazených datových bloků
+    int32_t clusters_needed = (file_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    
+    if (file_inode.direct1 > 0) free_cluster(fs, file_inode.direct1);
+    if (file_inode.direct2 > 0) free_cluster(fs, file_inode.direct2);
+    if (file_inode.direct3 > 0) free_cluster(fs, file_inode.direct3);
+    if (file_inode.direct4 > 0) free_cluster(fs, file_inode.direct4);
+    if (file_inode.direct5 > 0) free_cluster(fs, file_inode.direct5);
+    
+
+    if (file_inode.indirect1 > 0) {
+
+        int32_t pointers[PTRS_PER_CLUSTER];
+        read_cluster(fs, file_inode.indirect1, pointers);
+        
+        for (int i = 0; i < PTRS_PER_CLUSTER && pointers[i] > 0; i++) {
+            free_cluster(fs, pointers[i]);
+        }
+        
+
+        free_cluster(fs, file_inode.indirect1);
+    }
+    
+    if (file_inode.indirect2 > 0) {
+        // Read L1 indirect block
+        int32_t l1_pointers[PTRS_PER_CLUSTER];
+        read_cluster(fs, file_inode.indirect2, l1_pointers);
+        
+        for (int i = 0; i < PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
+            // Read L2 indirect block
+            int32_t l2_pointers[PTRS_PER_CLUSTER];
+            read_cluster(fs, l1_pointers[i], l2_pointers);
+            
+            // Free data clusters
+            for (int j = 0; j < PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
+                free_cluster(fs, l2_pointers[j]);
+            }
+            
+            // Free L2 block
+            free_cluster(fs, l1_pointers[i]);
+        }
+        
+        // Free L1 block
+        free_cluster(fs, file_inode.indirect2);
+    }
+    
+
+    clear_bit(fs->inode_bitmap, file_inode_id);
+    save_bitmaps(fs);
+    
+
+    // zjištění jména souboru a cílového umístění
+    char path_copy[256];
+    strncpy(path_copy, path, sizeof(path_copy) - 1);
+    path_copy[sizeof(path_copy) - 1] = '\0';
+    
+    char *last_slash = strrchr(path_copy, '/');
+    int32_t parent_inode;
+    char filename[NAME_SIZE];
+    
+    if (last_slash) {
+        *last_slash = '\0';
+        char *name = last_slash + 1;
+        
+        if (path_copy[0] == '\0') {
+            parent_inode = 0;  //root adresář
+        } else {
+            parent_inode = resolve_path(fs, path_copy);
+        }
+        
+        strncpy(filename, name, NAME_SIZE - 1);
+        filename[NAME_SIZE - 1] = '\0';
+    } else {
+        parent_inode = fs->current_inode;
+        strncpy(filename, path, NAME_SIZE - 1);
+        filename[NAME_SIZE - 1] = '\0';
+    }
+    
+    // odstranění z nadřazeného adresáře
+    if (!remove_from_dir(fs, parent_inode, filename)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    printf("OK\n");
+    return true;
+}
+
+bool rmdir(filesystem_t *fs, const char *path) {
+    if (!path || !path[0]) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //nalezení inodu
+    int32_t dir_inode_id = resolve_path(fs, path);
+    
+    if (dir_inode_id < 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //nemůže se jednat o root adresář
+    if (dir_inode_id == 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+
+    inode_t dir_inode;
+    if (!read_inode(fs, dir_inode_id, &dir_inode)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //musí se jednat o adresář
+    if (!dir_inode.is_directory) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+
+    int32_t cluster_count = (dir_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    dir_entry_t entries[ENTRIES_PER_CLUSTER];
+    
+    for (int32_t i = 0; i < cluster_count; i++) {
+        int32_t cluster = get_file_cluster(fs, &dir_inode, i);
+        if (cluster == 0) continue;
+        
+        read_cluster(fs, cluster, entries);
+        
+        for (int j = 0; j < ENTRIES_PER_CLUSTER; j++) {
+            if (entries[j].inode != 0) {
+                //Sloěka není prázdná
+                printf("NOT EMPTY\n");
+                return false;
+            }
+        }
+    }
+    
+    //uvolnění inodu a clusterů
+    if (dir_inode.direct1 > 0) free_cluster(fs, dir_inode.direct1);
+    if (dir_inode.direct2 > 0) free_cluster(fs, dir_inode.direct2);
+    if (dir_inode.direct3 > 0) free_cluster(fs, dir_inode.direct3);
+    if (dir_inode.direct4 > 0) free_cluster(fs, dir_inode.direct4);
+    if (dir_inode.direct5 > 0) free_cluster(fs, dir_inode.direct5);
+    
+
+    clear_bit(fs->inode_bitmap, dir_inode_id);
+    save_bitmaps(fs);
+    
+    //odstranění záznamu - zjištění jména a nadřazeného adresáře
+    char path_copy[256];
+    strncpy(path_copy, path, sizeof(path_copy) - 1);
+    path_copy[sizeof(path_copy) - 1] = '\0';
+    
+    char *last_slash = strrchr(path_copy, '/');
+    int32_t parent_inode;
+    char dirname[NAME_SIZE];
+    
+    if (last_slash) {
+        *last_slash = '\0';
+        char *name = last_slash + 1;
+        
+        if (path_copy[0] == '\0') {
+            parent_inode = 0;
+        } else {
+            parent_inode = resolve_path(fs, path_copy);
+        }
+        
+        strncpy(dirname, name, NAME_SIZE - 1);
+        dirname[NAME_SIZE - 1] = '\0';
+    } else {
+        parent_inode = fs->current_inode;
+        strncpy(dirname, path, NAME_SIZE - 1);
+        dirname[NAME_SIZE - 1] = '\0';
+    }
+    
+    if (!remove_from_dir(fs, parent_inode, dirname)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    printf("OK\n");
+    return true;
+}
+
+
+
+bool mv(filesystem_t *fs, const char *src_path, const char *dest_path) {
+    if (!src_path || !src_path[0] || !dest_path || !dest_path[0]) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    int32_t src_inode_id = resolve_path(fs, src_path);
+    
+    if (src_inode_id < 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+
+    if (src_inode_id == 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    inode_t src_inode;
+    if (!read_inode(fs, src_inode_id, &src_inode)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //získání jména souboru a nadřazeného adresáře
+    char src_copy[256];
+    strncpy(src_copy, src_path, sizeof(src_copy) - 1);
+    src_copy[sizeof(src_copy) - 1] = '\0';
+    
+    char *last_slash = strrchr(src_copy, '/');
+    int32_t src_parent_inode;
+    char src_filename[NAME_SIZE];
+    
+    if (last_slash) {
+        *last_slash = '\0';
+        char *name = last_slash + 1;
+        
+        if (src_copy[0] == '\0') {
+            src_parent_inode = 0;
+        } else {
+            src_parent_inode = resolve_path(fs, src_copy);
+            if (src_parent_inode < 0) {
+                printf("FILE NOT FOUND\n");
+                return false;
+            }
+        }
+        
+        strncpy(src_filename, name, NAME_SIZE - 1);
+        src_filename[NAME_SIZE - 1] = '\0';
+    } else {
+        src_parent_inode = fs->current_inode;
+        strncpy(src_filename, src_path, NAME_SIZE - 1);
+        src_filename[NAME_SIZE - 1] = '\0';
+    }
+    
+
+    int32_t dest_check = resolve_path(fs, dest_path);
+    int32_t dest_parent;
+    char dest_filename[NAME_SIZE];
+    
+    if (dest_check >= 0) {
+        //přesun do již existující složky
+        inode_t dest_check_inode;
+        if (!read_inode(fs, dest_check, &dest_check_inode)) {
+            printf("PATH NOT FOUND\n");
+            return false;
+        }
+        
+        if (dest_check_inode.is_directory) {
+            dest_parent = dest_check;
+            strncpy(dest_filename, src_filename, NAME_SIZE - 1);
+            dest_filename[NAME_SIZE - 1] = '\0';
+            
+            //soubor už v cílovém adresáři existuje
+            if (find_in_dir(fs, dest_parent, dest_filename) >= 0) {
+                printf("FILE ALREADY EXISTS\n");
+                return false;
+            }
+        } else {
+            //argument dest_path není složka
+            printf("FILE NOT FOUND\n");
+            return false;
+        }
+    } else {
+        //nová cesta - zjištění jména nového souboru a nadřazeného adresáře
+        char dest_copy[256];
+        strncpy(dest_copy, dest_path, sizeof(dest_copy) - 1);
+        dest_copy[sizeof(dest_copy) - 1] = '\0';
+        
+        char *last_slash = strrchr(dest_copy, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            char *name = last_slash + 1;
+            
+            if (dest_copy[0] == '\0') {
+                dest_parent = 0;
+            } else {
+                dest_parent = resolve_path(fs, dest_copy);
+                if (dest_parent < 0) {
+                    printf("PATH NOT FOUND\n");
+                    return false;
+                }
+            }
+            
+            strncpy(dest_filename, name, NAME_SIZE - 1);
+            dest_filename[NAME_SIZE - 1] = '\0';
+        } else {
+            dest_parent = fs->current_inode;
+            strncpy(dest_filename, dest_path, NAME_SIZE - 1);
+            dest_filename[NAME_SIZE - 1] = '\0';
+        }
+        
+        // Ověření, že se jedná o složku
+        inode_t dest_parent_inode;
+        if (!read_inode(fs, dest_parent, &dest_parent_inode) || !dest_parent_inode.is_directory) {
+            printf("PATH NOT FOUND\n");
+            return false;
+        }
+    }
+    
+    //Odebrání z předchozí složky a přidání do nové
+    if (!remove_from_dir(fs, src_parent_inode, src_filename)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+
+    if (!add_to_dir(fs, dest_parent, dest_filename, src_inode_id)) {
+        add_to_dir(fs, src_parent_inode, src_filename, src_inode_id);
+        printf("PATH NOT FOUND\n");
+        return false;
+    }
+    
     printf("OK\n");
     return true;
 }

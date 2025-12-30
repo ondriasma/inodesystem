@@ -285,3 +285,33 @@ void update_path(char *current_path, const char *input) {
         strcat(current_path, input);
     }
 }
+
+
+
+// Add to filesystem.c
+bool remove_from_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name) {
+    inode_t dir_inode;
+    if (!read_inode(fs, dir_inode_id, &dir_inode)) return false;
+    
+    int32_t cluster_count = (dir_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    dir_entry_t entries[ENTRIES_PER_CLUSTER];
+    
+    for (int32_t i = 0; i < cluster_count; i++) {
+        int32_t cluster = get_file_cluster(fs, &dir_inode, i);
+        if (cluster == 0) continue;
+        
+        read_cluster(fs, cluster, entries);
+        
+        for (int j = 0; j < ENTRIES_PER_CLUSTER; j++) {
+            if (entries[j].inode != 0 && strcmp(entries[j].name, name) == 0) {
+                // Found it - zero it out
+                entries[j].inode = 0;
+                memset(entries[j].name, 0, NAME_SIZE);
+                write_cluster(fs, cluster, entries);
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}

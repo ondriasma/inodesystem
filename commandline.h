@@ -44,3 +44,10 @@ bool rmdir(filesystem_t *fs, const char *path);
 
 //Přesune soubor src_path do umístění dest_path, nebo ho přejmenuje
 bool mv(filesystem_t *fs, const char *src_path, const char *dest_path);
+
+//Nahraje soubor z FS do umístění na pevném disku
+bool outcp(filesystem_t *fs, const char *src, const char *dest);
+
+/*Načte soubor z pevného disku, ve kterém budou jednotlivé příkazy, a začne je
+sekvenčně vykonávat. Formát je 1 příkaz/1 řádek*/
+bool load(filesystem_t *fs, const char *filename);

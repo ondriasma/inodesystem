@@ -54,6 +54,8 @@ int main(int argc, char *argv[]) {
         else if (strcmp(cmd, "rm") == 0) rm(&fs, arg1);
         else if (strcmp(cmd, "rmdir") == 0) rmdir(&fs, arg1);
         else if (strcmp(cmd, "mv") == 0) mv(&fs, arg1, arg2);
+        else if (strcmp(cmd, "outcp") == 0) outcp(&fs, arg1, arg2);
+        else if (strcmp(cmd, "load") == 0) load(&fs, arg1);
         else printf("Unknown command\n");
     }
     

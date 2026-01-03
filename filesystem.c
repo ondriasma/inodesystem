@@ -127,7 +127,7 @@ int32_t find_in_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name) {
         return -1;
     }
     
-    dir_entry_t entries[ENTRIES_PER_CLUSTER];
+    dir_item_t entries[ENTRIES_PER_CLUSTER];
     
     for (int32_t i = 0; i < cluster_count; i++) {
         int32_t cluster = get_file_cluster(fs, &dir_inode, i);
@@ -165,7 +165,7 @@ bool add_to_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name, int32_
     if (!read_inode(fs, dir_inode_id, &dir_inode)) return false;
     
     int32_t cluster_count = (dir_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
-    dir_entry_t entries[ENTRIES_PER_CLUSTER];
+    dir_item_t entries[ENTRIES_PER_CLUSTER];
     
     //Není prázdný cluster?
     for (int32_t i = 0; i < cluster_count; i++) {
@@ -294,7 +294,7 @@ bool remove_from_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name) {
     if (!read_inode(fs, dir_inode_id, &dir_inode)) return false;
     
     int32_t cluster_count = (dir_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
-    dir_entry_t entries[ENTRIES_PER_CLUSTER];
+    dir_item_t entries[ENTRIES_PER_CLUSTER];
     
     for (int32_t i = 0; i < cluster_count; i++) {
         int32_t cluster = get_file_cluster(fs, &dir_inode, i);

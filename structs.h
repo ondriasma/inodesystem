@@ -45,7 +45,7 @@ typedef struct {
 typedef struct {
     int32_t inode;              // inode odpovídající souboru
     char name[NAME_SIZE];       //8+3 + /0 C/C++ ukoncovaci string znak
-} dir_entry_t;
+} dir_item_t;
 
 
 typedef struct {

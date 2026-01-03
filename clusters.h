@@ -3,7 +3,7 @@
 
 
 
-#define ENTRIES_PER_CLUSTER (CLUSTER_SIZE / sizeof(dir_entry_t))
+#define ENTRIES_PER_CLUSTER (CLUSTER_SIZE / sizeof(dir_item_t))
 #define INODES_PER_CLUSTER (CLUSTER_SIZE / sizeof(inode_t))
 #define PTRS_PER_CLUSTER (CLUSTER_SIZE / sizeof(int32_t))
 

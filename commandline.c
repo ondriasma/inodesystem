@@ -41,7 +41,7 @@ bool ls(filesystem_t *fs, const char *path) {
         return true;
     }
     
-    dir_entry_t entries[ENTRIES_PER_CLUSTER];
+    dir_item_t entries[ENTRIES_PER_CLUSTER];
     
     for (int32_t i = 0; i < cluster_count; i++) {
         int32_t cluster = get_file_cluster(fs, &dir_inode, i);
@@ -151,8 +151,13 @@ bool incp(filesystem_t *fs, const char *src, const char *dest) {
         }
         
         int32_t offset = i * fs->sb.cluster_size;
-        int32_t to_write = (size - offset > fs->sb.cluster_size) ? fs->sb.cluster_size : size - offset;
-        
+        int32_t to_write;
+        if (size - offset > fs->sb.cluster_size) {
+            to_write = fs->sb.cluster_size;
+        } else {
+            to_write = size - offset;
+        }
+
         uint8_t buffer[CLUSTER_SIZE] = {0};
         memcpy(buffer, data + offset, to_write);
         write_cluster(fs, cluster, buffer);
@@ -743,7 +748,7 @@ bool rmdir(filesystem_t *fs, const char *path) {
     
 
     int32_t cluster_count = (dir_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
-    dir_entry_t entries[ENTRIES_PER_CLUSTER];
+    dir_item_t entries[ENTRIES_PER_CLUSTER];
     
     for (int32_t i = 0; i < cluster_count; i++) {
         int32_t cluster = get_file_cluster(fs, &dir_inode, i);
@@ -848,3 +853,174 @@ bool mv(filesystem_t *fs, const char *src_path, const char *dest_path) {
 
 
 
+bool outcp(filesystem_t *fs, const char *src, const char *dest) {
+    //Nalezení souboru ve filewsystému
+    int32_t file_inode_id = resolve_path(fs, src);
+    
+    if (file_inode_id < 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+
+    inode_t file_inode;
+    if (!read_inode(fs, file_inode_id, &file_inode)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //nejedná se o složku
+    if (file_inode.is_directory) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    FILE *dest_file = fopen(dest, "wb");
+    if (!dest_file) {
+        printf("PATH NOT FOUND\n");
+        return false;
+    }
+    
+    int32_t clusters_needed = (file_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    uint8_t buffer[CLUSTER_SIZE];
+    int32_t bytes_written = 0;
+    
+    //Čtení dat z clusterů a zápis do výsledného souboru
+    for (int32_t i = 0; i < clusters_needed; i++) {
+        int32_t cluster = get_file_cluster(fs, &file_inode, i);
+        if (cluster == 0) break;
+        
+        if (!read_cluster(fs, cluster, buffer)) {
+            fclose(dest_file);
+            printf("PATH NOT FOUND\n");
+            return false;
+        }
+        
+        //poslední cluster
+        int32_t bytes_remaining = file_inode.file_size - bytes_written;
+        int32_t to_write;
+        if (bytes_remaining > fs->sb.cluster_size) {
+            to_write = fs->sb.cluster_size;
+        } else {
+            to_write = bytes_remaining;
+        }
+
+        
+        if (fwrite(buffer, 1, to_write, dest_file) != (size_t)to_write) {
+            fclose(dest_file);
+            printf("PATH NOT FOUND\n");
+            return false;
+        }
+        
+        bytes_written += to_write;
+    }
+    
+    fclose(dest_file);
+    printf("OK\n");
+    return true;
+}
+
+
+
+bool load(filesystem_t *fs, const char *filename) {
+    if (!filename || !filename[0]) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    char line[512];
+    int line_number = 0;
+    bool success = false;
+    
+    //čtení a vykonávání kódu po řádcích
+    while (fgets(line, sizeof(line), file)) {
+        line_number++;
+        
+
+        size_t len = strlen(line);
+        if (len > 0 && line[len - 1] == '\n') {
+            line[len - 1] = '\0';
+        }
+        
+        if (line[0] == '\0') {
+            continue;
+        }
+        
+        // Parse command and arguments
+        char cmd[64] = {0}, arg1[256] = {0}, arg2[256] = {0};
+        sscanf(line, "%s %s %s", cmd, arg1, arg2);
+        
+        if (cmd[0] == '\0') {
+            continue;
+        }
+        
+        bool success = false;
+        
+        if (strcmp(cmd, "format") == 0) {
+            success = format(fs, arg1);
+        }
+        else if (strcmp(cmd, "mkdir") == 0) {
+            success = mkdir(fs, arg1);
+        }
+        else if (strcmp(cmd, "pwd") == 0) {
+            pwd(fs);
+            success = true;
+        }
+        else if (strcmp(cmd, "ls") == 0) {
+            success = ls(fs, arg1[0] ? arg1 : NULL);
+        }
+        else if (strcmp(cmd, "cd") == 0) {
+            success = cd(fs, arg1);
+        }
+        else if (strcmp(cmd, "cat") == 0) {
+            success = cat(fs, arg1);
+        }
+        else if (strcmp(cmd, "incp") == 0) {
+            success = incp(fs, arg1, arg2);
+        }
+        else if (strcmp(cmd, "outcp") == 0) {
+            success = outcp(fs, arg1, arg2);
+        }
+        else if (strcmp(cmd, "statfs") == 0) {
+            statfs(fs);
+            success = true;
+        }
+        else if (strcmp(cmd, "info") == 0) {
+            success = info(fs, arg1);
+        }
+        else if (strcmp(cmd, "cp") == 0) {
+            success = cp(fs, arg1, arg2);
+        }
+        else if (strcmp(cmd, "rm") == 0) {
+            success = rm(fs, arg1);
+        }
+        else if (strcmp(cmd, "rmdir") == 0) {
+            success = rmdir(fs, arg1);
+        }
+        else if (strcmp(cmd, "mv") == 0) {
+            success = mv(fs, arg1, arg2);
+        }
+        
+        else {
+            printf("Unknown command: %s\n", cmd);
+            success = false;
+        }
+        
+        
+    }
+    
+    fclose(file);
+    
+    if (success) {
+        printf("OK\n");
+    }
+    
+    return success;
+}

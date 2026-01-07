@@ -484,7 +484,22 @@ bool info(filesystem_t *fs, const char *path) {
     
     if (inode.indirect2 > 0) {
         printf("2. Nepřímý blok: %d\n", inode.indirect2);
-        // TODO - výpis obsahu 2. nepřímého bloku
+        int32_t l1_pointers[PTRS_PER_CLUSTER];
+        read_cluster(fs, inode.indirect2, l1_pointers);
+        for (int i = 0; i < PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
+            printf("  -> L1 blok [%d]: %d\n     -> Clustery: ", i, l1_pointers[i]);
+            int32_t l2_pointers[PTRS_PER_CLUSTER];
+            read_cluster(fs, l1_pointers[i], l2_pointers);
+            
+            bool first = true;
+            for (int j = 0; j < PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
+                if (!first) printf(", ");
+                printf("%d", l2_pointers[j]);
+                first = false;
+            }
+            printf("\n");
+        }
+
     }
     
     printf("\n");

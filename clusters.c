@@ -43,6 +43,7 @@ int32_t get_file_cluster(filesystem_t *fs, inode_t *inode, int32_t cluster_index
     if (cluster_index == 3 && inode->direct4) return inode->direct4;
     if (cluster_index == 4 && inode->direct5) return inode->direct5;
     
+    //pozice indexu v nepřímém bloku
     cluster_index -= DIRECT_LINKS;
     
     //Nepřímé bloky
@@ -52,29 +53,29 @@ int32_t get_file_cluster(filesystem_t *fs, inode_t *inode, int32_t cluster_index
         return pointers[cluster_index];
     }
     
+    //pozice indexu ve druhém nepřímém bloku
     cluster_index -= PTRS_PER_CLUSTER;
     
 
-    if (cluster_index < PTRS_PER_CLUSTER * PTRS_PER_CLUSTER && inode->indirect2) {
-        int32_t l1_index = cluster_index / PTRS_PER_CLUSTER;
-        int32_t l2_index = cluster_index % PTRS_PER_CLUSTER;
-        
-        int32_t l1_pointers[PTRS_PER_CLUSTER];
-        read_cluster(fs, inode->indirect2, l1_pointers);
-        
-        if (l1_pointers[l1_index] == 0) return 0;
-        
-        int32_t l2_pointers[PTRS_PER_CLUSTER];
-        read_cluster(fs, l1_pointers[l1_index], l2_pointers);
-        return l2_pointers[l2_index];
-    }
+    if (inode->indirect2 == 0) return 0;
+    int32_t l1_pointers[PTRS_PER_CLUSTER];
+    read_cluster(fs, inode->indirect2, l1_pointers);
+
+    int32_t l1_index = cluster_index / PTRS_PER_CLUSTER;//kolikátý l2 blok hledáme
+    int32_t l2_index = cluster_index % PTRS_PER_CLUSTER;//pozice v něm
+
+    if (l1_index >= PTRS_PER_CLUSTER || l1_pointers[l1_index] == 0) return 0;
+
+    int32_t l2_pointers[PTRS_PER_CLUSTER];
+    read_cluster(fs, l1_pointers[l1_index], l2_pointers);
+    return l2_pointers[l2_index];
+
     
-    return 0;
 }
 
 int set_file_cluster(filesystem_t *fs, inode_t *inode, int32_t cluster_index, int32_t cluster_num) {
     printf("[DEBUG] set_file_cluster: index=%d, cluster=%d\n", cluster_index, cluster_num);
-    
+    //přímé odkazy
     if (cluster_index == 0) { 
         inode->direct1 = cluster_num; 
         printf("[DEBUG] Set direct1 = %d\n", cluster_num);
@@ -118,6 +119,32 @@ int set_file_cluster(filesystem_t *fs, inode_t *inode, int32_t cluster_index, in
         write_cluster(fs, inode->indirect1, pointers);
         return 0;
     }
-    
-    return -1;
+
+    cluster_index -= PTRS_PER_CLUSTER;
+
+    if (inode->indirect2 == 0) {
+        inode->indirect2 = alloc_cluster(fs);
+        uint8_t buffer[CLUSTER_SIZE] = {0};
+        write_cluster(fs, inode->indirect2, buffer);
+    }
+
+    int32_t l1_pointers[PTRS_PER_CLUSTER];
+    read_cluster(fs, inode->indirect2, l1_pointers);
+
+    int32_t l1_index = cluster_index / PTRS_PER_CLUSTER;
+    int32_t l2_index = cluster_index % PTRS_PER_CLUSTER;
+
+    if (l1_pointers[l1_index] == 0) {
+        l1_pointers[l1_index] = alloc_cluster(fs);
+        uint8_t buffer[CLUSTER_SIZE] = {0};
+        write_cluster(fs, l1_pointers[l1_index], buffer);
+        write_cluster(fs, inode->indirect2, l1_pointers);
+    }
+
+    int32_t l2_pointers[PTRS_PER_CLUSTER];
+    read_cluster(fs, l1_pointers[l1_index], l2_pointers);
+    l2_pointers[l2_index] = cluster_num;
+    write_cluster(fs, l1_pointers[l1_index], l2_pointers);
+
+    return 0;
 }

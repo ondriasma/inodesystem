@@ -1039,3 +1039,350 @@ bool load(filesystem_t *fs, const char *filename) {
     
     return success;
 }
+
+
+
+bool xcp(filesystem_t *fs, const char *f1, const char *f2, const char *f3) {
+    if (!f1 || !f1[0] || !f2 || !f2[0] || 
+        !f3 || !f3[0]) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //Nalezení a načtení obou souborů
+    int32_t f1_inode_id = resolve_path(fs, f1);
+    if (f1_inode_id < 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    inode_t f1_inode;
+    if (!read_inode(fs, f1_inode_id, &f1_inode) || f1_inode.is_directory) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    int32_t f2_inode_id = resolve_path(fs, f2);
+    if (f2_inode_id < 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    inode_t f2_inode;
+    if (!read_inode(fs, f2_inode_id, &f2_inode) || f2_inode.is_directory) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //Načtení obsahu obou souborů
+    uint8_t *f1_data = malloc(f1_inode.file_size);
+    if (!f1_data) {
+        printf("CANNOT CREATE FILE\n");
+        return false;
+    }
+    
+    int32_t bytes_read = 0;
+    int32_t clusters_needed = (f1_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    uint8_t buffer[CLUSTER_SIZE];
+    
+    for (int32_t i = 0; i < clusters_needed; i++) {
+        int32_t cluster = get_file_cluster(fs, &f1_inode, i);
+        if (cluster == 0) break;
+        
+        read_cluster(fs, cluster, buffer);
+        
+        int32_t bytes_to_copy = f1_inode.file_size - bytes_read;
+        if (bytes_to_copy > fs->sb.cluster_size) {
+            bytes_to_copy = fs->sb.cluster_size;
+        }
+        
+        memcpy(f1_data + bytes_read, buffer, bytes_to_copy);
+        bytes_read += bytes_to_copy;
+    }
+
+    uint8_t *f2_data = malloc(f2_inode.file_size);
+    if (!f2_data) {
+        free(f1_data);
+        printf("CANNOT CREATE FILE\n");
+        return false;
+    }
+    
+    bytes_read = 0;
+    clusters_needed = (f2_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    
+    for (int32_t i = 0; i < clusters_needed; i++) {
+        int32_t cluster = get_file_cluster(fs, &f2_inode, i);
+        if (cluster == 0) break;
+        
+        read_cluster(fs, cluster, buffer);
+        
+        int32_t bytes_to_copy = f2_inode.file_size - bytes_read;
+        if (bytes_to_copy > fs->sb.cluster_size) {
+            bytes_to_copy = fs->sb.cluster_size;
+        }
+        
+        memcpy(f2_data + bytes_read, buffer, bytes_to_copy);
+        bytes_read += bytes_to_copy;
+    }
+    
+    //Spojení obou souborů do finálního
+    int32_t total_size = f1_inode.file_size + f2_inode.file_size;
+    uint8_t *final_data = malloc(total_size);
+    if (!final_data) {
+        free(f1_data);
+        free(f2_data);
+        printf("CANNOT CREATE FILE\n");
+        return false;
+    }
+
+    memcpy(final_data, f1_data, f1_inode.file_size);
+    memcpy(final_data + f1_inode.file_size, f2_data, f2_inode.file_size);
+
+    free(f1_data);
+    free(f2_data);
+
+    //Nalezení cesty k souboru a kontrola, zda již neexistuje
+    int32_t dest_parent;
+    char dest_filename[NAME_SIZE];
+    
+    if (!split_path(fs, f3, &dest_parent, &dest_filename)) {
+        free(final_data);
+        printf("PATH NOT FOUND\n");
+        return false;
+    }
+    
+
+    if (find_in_dir(fs, dest_parent, dest_filename) >= 0) {
+        free(final_data);
+        printf("FILE ALREADY EXIST\n");
+        return false;
+    }
+    
+    //Vytvoření nového souboru a zápis dat
+    int32_t f3_inode_id = alloc_inode(fs);
+    if (f3_inode_id < 0) {
+        free(final_data);
+        printf("CANNOT CREATE FILE\n");
+        return false;
+    }
+    
+    inode_t new_inode = {0};
+    new_inode.nodeid = f3_inode_id;
+    new_inode.is_directory = false;
+    new_inode.references = 1;
+    new_inode.file_size = total_size;
+    
+    // Zápis dat do clusterů
+    clusters_needed = (total_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    
+    for (int32_t i = 0; i < clusters_needed; i++) {
+        int32_t cluster = alloc_cluster(fs);
+        if (cluster < 0) {
+            free(final_data);
+            printf("CANNOT CREATE FILE\n");
+            return false;
+        }
+        
+        int32_t offset = i * fs->sb.cluster_size;
+        int32_t to_write = (total_size - offset > fs->sb.cluster_size) ? 
+                          fs->sb.cluster_size : total_size - offset;
+        
+        memset(buffer, 0, CLUSTER_SIZE);
+        memcpy(buffer, final_data + offset, to_write);
+        write_cluster(fs, cluster, buffer);
+        set_file_cluster(fs, &new_inode, i, cluster);
+    }
+
+    write_inode(fs, f3_inode_id, &new_inode);
+    
+    if (!add_to_dir(fs, dest_parent, dest_filename, f3_inode_id)) {
+        free(final_data);
+        printf("PATH NOT FOUND\n");
+        return false;
+    }
+
+    free(final_data);
+    printf("OK\n");
+    return true;
+}
+
+
+
+bool add(filesystem_t *fs, const char *f1, const char *f2) {
+    if (!f1 || !f1[0] || !f2 || !f2[0]) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //Nalezení obou souborů
+    int32_t f2_inode_id = resolve_path(fs, f1);
+    if (f2_inode_id < 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    inode_t f2_inode;
+    if (!read_inode(fs, f2_inode_id, &f2_inode)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+
+    if (f2_inode.is_directory) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+
+    int32_t f1_inode_id = resolve_path(fs, f2);
+    if (f1_inode_id < 0) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    inode_t f1_inode;
+    if (!read_inode(fs, f1_inode_id, &f1_inode)) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+
+    if (f1_inode.is_directory) {
+        printf("FILE NOT FOUND\n");
+        return false;
+    }
+    
+    //Načtení obsahu obou souborů
+    uint8_t *f2_data = malloc(f2_inode.file_size);
+    if (!f2_data) {
+        printf("CANNOT CREATE FILE\n");
+        return false;
+    }
+    
+    int32_t bytes_read = 0;
+    int32_t clusters_needed = (f2_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    uint8_t buffer[CLUSTER_SIZE];
+    
+    for (int32_t i = 0; i < clusters_needed; i++) {
+        int32_t cluster = get_file_cluster(fs, &f2_inode, i);
+        if (cluster == 0) break;
+        
+        read_cluster(fs, cluster, buffer);
+        
+        int32_t bytes_to_copy = f2_inode.file_size - bytes_read;
+        if (bytes_to_copy > fs->sb.cluster_size) {
+            bytes_to_copy = fs->sb.cluster_size;
+        }
+        
+        memcpy(f2_data + bytes_read, buffer, bytes_to_copy);
+        bytes_read += bytes_to_copy;
+    }
+    
+    uint8_t *f1_data = malloc(f1_inode.file_size);
+    if (!f1_data) {
+        free(f2_data);
+        printf("CANNOT CREATE FILE\n");
+        return false;
+    }
+    
+    bytes_read = 0;
+    clusters_needed = (f1_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    
+    for (int32_t i = 0; i < clusters_needed; i++) {
+        int32_t cluster = get_file_cluster(fs, &f1_inode, i);
+        if (cluster == 0) break;
+        
+        read_cluster(fs, cluster, buffer);
+        
+        int32_t bytes_to_copy = f1_inode.file_size - bytes_read;
+        if (bytes_to_copy > fs->sb.cluster_size) {
+            bytes_to_copy = fs->sb.cluster_size;
+        }
+
+        memcpy(f1_data + bytes_read, buffer, bytes_to_copy);
+        bytes_read += bytes_to_copy;
+    }
+    
+    //Spojení souborů
+    int32_t new_size = f2_inode.file_size + f1_inode.file_size;
+    uint8_t *combined_data = malloc(new_size);
+    if (!combined_data) {
+        free(f2_data);
+        free(f1_data);
+        printf("CANNOT CREATE FILE\n");
+        return false;
+    }
+
+    memcpy(combined_data, f2_data, f2_inode.file_size);
+    memcpy(combined_data + f2_inode.file_size, f1_data, f1_inode.file_size);
+
+    free(f2_data);
+    free(f1_data);
+    
+    //Uvolnění veškeré původní paměti - vše se zapíše znovu
+    if (f2_inode.direct1 > 0) free_cluster(fs, f2_inode.direct1);
+    if (f2_inode.direct2 > 0) free_cluster(fs, f2_inode.direct2);
+    if (f2_inode.direct3 > 0) free_cluster(fs, f2_inode.direct3);
+    if (f2_inode.direct4 > 0) free_cluster(fs, f2_inode.direct4);
+    if (f2_inode.direct5 > 0) free_cluster(fs, f2_inode.direct5);
+    
+    if (f2_inode.indirect1 > 0) {
+        int32_t pointers[PTRS_PER_CLUSTER];
+        read_cluster(fs, f2_inode.indirect1, pointers);
+        for (int i = 0; i < PTRS_PER_CLUSTER && pointers[i] > 0; i++) {
+            free_cluster(fs, pointers[i]);
+        }
+        free_cluster(fs, f2_inode.indirect1);
+    }
+    
+    if (f2_inode.indirect2 > 0) {
+        int32_t l1_pointers[PTRS_PER_CLUSTER];
+        read_cluster(fs, f2_inode.indirect2, l1_pointers);
+        
+        for (int i = 0; i < PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
+            int32_t l2_pointers[PTRS_PER_CLUSTER];
+            read_cluster(fs, l1_pointers[i], l2_pointers);
+            
+            for (int j = 0; j < PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
+                free_cluster(fs, l2_pointers[j]);
+            }
+            
+            free_cluster(fs, l1_pointers[i]);
+        }
+
+        free_cluster(fs, f2_inode.indirect2);
+    }
+    
+    f2_inode.direct1 = 0;
+    f2_inode.direct2 = 0;
+    f2_inode.direct3 = 0;
+    f2_inode.direct4 = 0;
+    f2_inode.direct5 = 0;
+    f2_inode.indirect1 = 0;
+    f2_inode.indirect2 = 0;
+    f2_inode.file_size = new_size;
+    
+    //Zápis nových dat - spojených souborů
+    clusters_needed = (new_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
+    
+    for (int32_t i = 0; i < clusters_needed; i++) {
+        int32_t cluster = alloc_cluster(fs);
+        if (cluster < 0) {
+            free(combined_data);
+            printf("CANNOT CREATE FILE\n");
+            return false;
+        }
+        
+        int32_t offset = i * fs->sb.cluster_size;
+        int32_t to_write = (new_size - offset > fs->sb.cluster_size) ? 
+                          fs->sb.cluster_size : new_size - offset;
+        
+        memset(buffer, 0, CLUSTER_SIZE);
+        memcpy(buffer, combined_data + offset, to_write);
+        write_cluster(fs, cluster, buffer);
+        set_file_cluster(fs, &f2_inode, i, cluster);
+    }
+
+    write_inode(fs, f2_inode_id, &f2_inode);
+
+    free(combined_data);
+    printf("OK\n");
+    return true;
+}

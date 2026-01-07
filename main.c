@@ -51,8 +51,8 @@ int main(int argc, char *argv[]) {
         printf("> ");
         if (!fgets(line, sizeof(line), stdin)) break;
         
-        char cmd[64], arg1[256] = {0}, arg2[256] = {0};
-        sscanf(line, "%s %s %s", cmd, arg1, arg2);
+        char cmd[64], arg1[256] = {0}, arg2[256] = {0}, arg3[256] = {0};
+        sscanf(line, "%s %s %s %s", cmd, arg1, arg2, arg3);
         
         if (strcmp(cmd, "exit") == 0) break;
         else if (strcmp(cmd, "format") == 0) {
@@ -78,6 +78,8 @@ int main(int argc, char *argv[]) {
         else if (strcmp(cmd, "mv") == 0) mv(&fs, arg1, arg2);
         else if (strcmp(cmd, "outcp") == 0) outcp(&fs, arg1, arg2);
         else if (strcmp(cmd, "load") == 0) load(&fs, arg1);
+        else if (strcmp(cmd, "xcp") == 0) xcp(&fs, arg1, arg2, arg3);
+        else if (strcmp(cmd, "add") == 0) add(&fs, arg1, arg2);
         else printf("Neznámý příkaz\n");
     }
     

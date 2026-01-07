@@ -51,3 +51,9 @@ bool outcp(filesystem_t *fs, const char *src, const char *dest);
 /*Načte soubor z pevného disku, ve kterém budou jednotlivé příkazy, a začne je
 sekvenčně vykonávat. Formát je 1 příkaz/1 řádek*/
 bool load(filesystem_t *fs, const char *filename);
+
+//Vytvoří soubor, který bude spojením dvou souborů
+bool xcp(filesystem_t *fs, const char *f1, const char *f2, const char *f3);
+
+//Přidá na konec souboru target obsah souboru source
+bool add(filesystem_t *fs, const char *f1, const char *f2);

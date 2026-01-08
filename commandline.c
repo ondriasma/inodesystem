@@ -172,7 +172,7 @@ bool incp(filesystem_t *fs, const char *src, const char *dest) {
 
 
     if (!add_to_dir(fs, dest_parent_id, clean_filename, new_inode_id)) {
-        printf("PATH NOT FOUND\n");
+        printf("ADDING TO DIRECTORY FAILED\n");
         free(data);
         return false;
     }
@@ -183,9 +183,12 @@ bool incp(filesystem_t *fs, const char *src, const char *dest) {
 }
 
 bool format(filesystem_t *fs, const char *size_str) {
-    int32_t size_mb = 600;//todo
-    if (size_str && size_str[0]) {
-        sscanf(size_str, "%dMB", &size_mb);
+    int32_t size_mb = DEFAULT_FS_SIZE;
+    if (size_str && *size_str) {
+        if (sscanf(size_str, "%dMB", &size_mb) != 1 || size_mb <= 0) {
+            printf("INVALID SIZE FORMAT WHILE FORMATTING\n");
+            return false;
+        }
     }
     
     int32_t total_size = size_mb * 1024 * 1024;
@@ -211,6 +214,15 @@ bool format(filesystem_t *fs, const char *size_str) {
     fs->sb.data_start = offset;
     
     save_superblock(fs);
+
+    if (fs->inode_bitmap != NULL) {
+        free(fs->inode_bitmap);
+        fs->inode_bitmap = NULL;
+    }
+    if (fs->data_bitmap != NULL) {
+        free(fs->data_bitmap);
+        fs->data_bitmap = NULL;
+    }
     
     // vytvoření bitmap
     fs->inode_bitmap = calloc(1, ibitmap_size);
@@ -219,7 +231,10 @@ bool format(filesystem_t *fs, const char *size_str) {
     
     // vytvoření root adresáře
     int32_t root_id = alloc_inode(fs);
-    printf("[DEBUG] format: root_id = %d\n", root_id);
+    if (root_id < 0) {
+        printf("CANNOT ALLOCATE ROOT INODE, MAYBE THE SIZE IS TOO BIG\n");
+        return false;
+    }
 
     inode_t root = {0};
     root.nodeid = root_id;
@@ -227,21 +242,12 @@ bool format(filesystem_t *fs, const char *size_str) {
     root.references = 1;
     root.parent = root_id;
 
-    bool b = write_inode(fs, root_id, &root);
-    printf("[DEBUG] format: write_inode returned %s\n", b ? "true" : "false");
-
-    if (!b) {
-        printf("[DEBUG] format: Failed to write root inode!\n");
+    if (!write_inode(fs, root_id, &root)) {
+        printf("WRITING TO INODE FAILED\n");
+        return false;
     }
 
-    // Try to read it back to verify, tohle celé smazat TODO
-    inode_t verify;
-    b = read_inode(fs, root_id, &verify);
-    printf("[DEBUG] format: read_inode returned %s\n", b ? "true" : "false");
-    if (b) {
-        printf("[DEBUG] format: Root inode verified: is_directory=%d, file_size=%d\n",
-            verify.is_directory, verify.file_size);
-    }
+    
     
     fs->current_inode = root_id;
     strcpy(fs->current_path, "/");
@@ -271,14 +277,14 @@ bool cd(filesystem_t *fs, const char *path) {
     // načtení i-uzlu cílové složky
     inode_t target;
     if (!read_inode(fs, target_inode, &target)) {
-        printf("PATH NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
 
 
     // test, jestli se vůbec jedná o složku
     if (!target.is_directory) {
-        printf("PATH NOT FOUND\n");
+        printf("TARGET IS NOT A DIRECTORY\n");
         return false;
     }
     
@@ -320,12 +326,12 @@ bool cat(filesystem_t *fs, const char *filename) {
     
     inode_t file_inode;
     if (!read_inode(fs, file_inode_id, &file_inode)) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
     
     if (file_inode.is_directory) {
-        printf("FILE NOT FOUND\n");
+        printf("ERROR - FILE IS A DIRECTORY\n");
         return false;
     }
     
@@ -420,7 +426,7 @@ bool info(filesystem_t *fs, const char *path) {
     
     inode_t inode;
     if (!read_inode(fs, inode_id, &inode)) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
     
@@ -520,13 +526,13 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
     
     inode_t src_inode;
     if (!read_inode(fs, src_inode_id, &src_inode)) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
     
     // jedná se skutečně o soubor, ne o adresář
     if (src_inode.is_directory) {
-        printf("FILE NOT FOUND\n");
+        printf("ERROR - SOURCE IS A DIRECTORY\n");
         return false;
     }
     
@@ -557,11 +563,7 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
     }
     
 //Vytvoření cílového souboru
-    //char dest_copy[256];
-    //strncpy(dest_copy, dest_path, sizeof(dest_copy) - 1);
-    //dest_copy[sizeof(dest_copy) - 1] = '\0';
-    
-    
+
     int32_t dest_parent;
     char dest_filename[NAME_SIZE];
     
@@ -619,7 +621,7 @@ bool cp(filesystem_t *fs, const char *src_path, const char *dest_path) {
     //přidání do adresáře
     if (add_to_dir(fs, dest_parent, dest_filename, dest_inode_id) == false) {
         free(file_data);
-        printf("PATH NOT FOUND\n");
+        printf("ERROR - ADD TO DIRECTORY FAILED\n");
         return false;
     }
     
@@ -645,13 +647,13 @@ bool rm(filesystem_t *fs, const char *path) {
     
     inode_t file_inode;
     if (!read_inode(fs, file_inode_id, &file_inode)) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
     
     //jedná se o adresář - špatný příkaz
     if (file_inode.is_directory) {
-        printf("FILE NOT FOUND\n");
+        printf("ERROR - TARGET IS A DIRECTORY\n");
         return false;
     }
     
@@ -679,25 +681,22 @@ bool rm(filesystem_t *fs, const char *path) {
     }
     
     if (file_inode.indirect2 > 0) {
-        // Read L1 indirect block
+
         int32_t l1_pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, file_inode.indirect2, l1_pointers);
         
         for (int i = 0; i < PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
-            // Read L2 indirect block
+
             int32_t l2_pointers[PTRS_PER_CLUSTER];
             read_cluster(fs, l1_pointers[i], l2_pointers);
             
-            // Free data clusters
             for (int j = 0; j < PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
                 free_cluster(fs, l2_pointers[j]);
             }
             
-            // Free L2 block
             free_cluster(fs, l1_pointers[i]);
         }
-        
-        // Free L1 block
+
         free_cluster(fs, file_inode.indirect2);
     }
     
@@ -706,10 +705,8 @@ bool rm(filesystem_t *fs, const char *path) {
     save_bitmaps(fs);
     
 
-    // zjištění jména souboru a cílového umístění
-    
-    
-    
+    //zjištění jména souboru a cílového umístění
+
     int32_t parent_inode;
     char filename[NAME_SIZE];
     
@@ -720,7 +717,7 @@ bool rm(filesystem_t *fs, const char *path) {
     
     // odstranění z nadřazeného adresáře
     if (!remove_from_dir(fs, parent_inode, filename)) {
-        printf("FILE NOT FOUND\n");
+        printf("REMOVING FROM DIRECTORY FAILED\n");
         return false;
     }
     
@@ -751,13 +748,13 @@ bool rmdir(filesystem_t *fs, const char *path) {
 
     inode_t dir_inode;
     if (!read_inode(fs, dir_inode_id, &dir_inode)) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
     
     //musí se jednat o adresář
     if (!dir_inode.is_directory) {
-        printf("FILE NOT FOUND\n");
+        printf("ERROR - TARGET IS NOT A DIRECTORY\n");
         return false;
     }
     
@@ -773,8 +770,8 @@ bool rmdir(filesystem_t *fs, const char *path) {
         
         for (int j = 0; j < ENTRIES_PER_CLUSTER; j++) {
             if (entries[j].inode != 0) {
-                //Sloěka není prázdná
-                printf("NOT EMPTY\n");
+                //Složka není prázdná
+                printf("ERROR - DIRECTORY IS NOT EMPTY\n");
                 return false;
             }
         }
@@ -806,7 +803,7 @@ bool rmdir(filesystem_t *fs, const char *path) {
     }
     
     if (!remove_from_dir(fs, parent_inode, dirname)) {
-        printf("FILE NOT FOUND\n");
+        printf("REMOVING FROM DIRECTORY FAILED\n");
         return false;
     }
     
@@ -854,7 +851,7 @@ bool mv(filesystem_t *fs, const char *src_path, const char *dest_path) {
     }
 
     if (find_in_dir(fs, dest_parent, dest_name) >= 0) {
-        printf("FILE ALREADY EXISTS\n");
+        printf("FILE WITH THIS NAME ALREADY EXISTS\n");
         return false;
     }
 
@@ -880,7 +877,7 @@ bool outcp(filesystem_t *fs, const char *src, const char *dest) {
 
     inode_t file_inode;
     if (!read_inode(fs, file_inode_id, &file_inode)) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
     
@@ -892,7 +889,7 @@ bool outcp(filesystem_t *fs, const char *src, const char *dest) {
     
     FILE *dest_file = fopen(dest, "wb");
     if (!dest_file) {
-        printf("PATH NOT FOUND\n");
+        printf("OPENING FILE FAILED\n");
         return false;
     }
     
@@ -907,7 +904,7 @@ bool outcp(filesystem_t *fs, const char *src, const char *dest) {
         
         if (!read_cluster(fs, cluster, buffer)) {
             fclose(dest_file);
-            printf("PATH NOT FOUND\n");
+            printf("READING CLUSTER FAILED\n");
             return false;
         }
         
@@ -920,10 +917,9 @@ bool outcp(filesystem_t *fs, const char *src, const char *dest) {
             to_write = bytes_remaining;
         }
 
-        
         if (fwrite(buffer, 1, to_write, dest_file) != (size_t)to_write) {
             fclose(dest_file);
-            printf("PATH NOT FOUND\n");
+            printf("ERROR\n");
             return false;
         }
         
@@ -942,23 +938,20 @@ bool load(filesystem_t *fs, const char *filename) {
         printf("FILE NOT FOUND\n");
         return false;
     }
-    
 
     FILE *file = fopen(filename, "r");
     if (!file) {
-        printf("FILE NOT FOUND\n");
+        printf("OPENING FILE FAILED\n");
         return false;
     }
     
     char line[512];
-    int line_number = 0;
-    bool success = false;
+    //int line_number = 0;
+    bool ok = false;
     
     //čtení a vykonávání kódu po řádcích
     while (fgets(line, sizeof(line), file)) {
-        line_number++;
-        
-
+        //line_number++;
         size_t len = strlen(line);
         if (len > 0 && line[len - 1] == '\n') {
             line[len - 1] = '\0';
@@ -969,8 +962,8 @@ bool load(filesystem_t *fs, const char *filename) {
         }
         
         // Parse command and arguments
-        char cmd[64] = {0}, arg1[256] = {0}, arg2[256] = {0};
-        sscanf(line, "%s %s %s", cmd, arg1, arg2);
+        char cmd[64] = {0}, arg1[256] = {0}, arg2[256] = {0}, arg3[256] = {0};
+        sscanf(line, "%s %s %s %s", cmd, arg1, arg2, arg3);
         
         if (cmd[0] == '\0') {
             continue;
@@ -1022,22 +1015,29 @@ bool load(filesystem_t *fs, const char *filename) {
         else if (strcmp(cmd, "mv") == 0) {
             success = mv(fs, arg1, arg2);
         }
-        
+        else if (strcmp(cmd, "xcp") == 0) {
+            success = xcp(fs, arg1, arg2, arg3);
+        }
+        else if (strcmp(cmd, "add") == 0) {
+            success = add(fs, arg1, arg2);
+        }
         else {
             printf("Unknown command: %s\n", cmd);
             success = false;
         }
-        
+        if (!success) {
+            ok = false;
+        }
         
     }
     
     fclose(file);
     
-    if (success) {
+    if (ok) {
         printf("OK\n");
     }
     
-    return success;
+    return ok;
 }
 
 
@@ -1058,7 +1058,7 @@ bool xcp(filesystem_t *fs, const char *f1, const char *f2, const char *f3) {
     
     inode_t f1_inode;
     if (!read_inode(fs, f1_inode_id, &f1_inode) || f1_inode.is_directory) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
     
@@ -1070,7 +1070,7 @@ bool xcp(filesystem_t *fs, const char *f1, const char *f2, const char *f3) {
     
     inode_t f2_inode;
     if (!read_inode(fs, f2_inode_id, &f2_inode) || f2_inode.is_directory) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
     
@@ -1197,7 +1197,7 @@ bool xcp(filesystem_t *fs, const char *f1, const char *f2, const char *f3) {
     
     if (!add_to_dir(fs, dest_parent, dest_filename, f3_inode_id)) {
         free(final_data);
-        printf("PATH NOT FOUND\n");
+        printf("ADDING TO DIRECTORY FAILED\n");
         return false;
     }
 
@@ -1223,12 +1223,12 @@ bool add(filesystem_t *fs, const char *f1, const char *f2) {
     
     inode_t f2_inode;
     if (!read_inode(fs, f2_inode_id, &f2_inode)) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
 
     if (f2_inode.is_directory) {
-        printf("FILE NOT FOUND\n");
+        printf("ERROR - PATH REPRESENTS A DIRECTORY\n");
         return false;
     }
 
@@ -1240,12 +1240,12 @@ bool add(filesystem_t *fs, const char *f1, const char *f2) {
     
     inode_t f1_inode;
     if (!read_inode(fs, f1_inode_id, &f1_inode)) {
-        printf("FILE NOT FOUND\n");
+        printf("READING INODE FAILED\n");
         return false;
     }
 
     if (f1_inode.is_directory) {
-        printf("FILE NOT FOUND\n");
+        printf("ERROR - PATH REPRESENTS A DIRECTORY\n");
         return false;
     }
     

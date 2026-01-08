@@ -8,6 +8,7 @@
 
 
 #define CLUSTER_SIZE 4096
+#define DEFAULT_FS_SIZE 600
 #define NAME_SIZE 12
 #define DIRECT_LINKS 5
 #define SIGNATURE "ZOSFS25"

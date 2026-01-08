@@ -9,7 +9,7 @@
 
 int main(int argc, char *argv[]) {
 
-    char *filename = "filesystem";
+    char *filename = "filesystem";//default jméno, pokud se nezadá jiné
     if (argc > 1) {
         filename = argv[1];
     }

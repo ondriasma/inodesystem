@@ -50,6 +50,15 @@ bool save_superblock(filesystem_t *fs) {
 void load_bitmaps(filesystem_t *fs) {
     int32_t ibitmap_size = (fs->sb.inode_count + 7) / 8;
     int32_t dbitmap_size = (fs->sb.cluster_count + 7) / 8;
+
+    if (fs->inode_bitmap != NULL) {
+        free(fs->inode_bitmap);
+        fs->inode_bitmap = NULL;
+    }
+    if (fs->data_bitmap != NULL) {
+        free(fs->data_bitmap);
+        fs->data_bitmap = NULL;
+    }
     
     fs->inode_bitmap = malloc(ibitmap_size);
     fs->data_bitmap = malloc(dbitmap_size);

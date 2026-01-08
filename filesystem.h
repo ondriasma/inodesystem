@@ -8,12 +8,6 @@ bool read_bytes(filesystem_t *fs, int32_t offset, void *buffer, size_t size);
 // wrapper fseek a fwrite
 bool write_bytes(filesystem_t *fs, int32_t offset, const void *buffer, size_t size);
 
-// najde pozici clusteru v souboru a přečte jeho obsah
-bool read_cluster(filesystem_t *fs, int32_t cluster_num, void *buffer);
-
-// najde pozici clusteru v souboru a zapíše jeho obsah
-bool write_cluster(filesystem_t *fs, int32_t cluster_num, const void *buffer);
-
 // přečtení dat ze superbloku
 bool load_superblock(filesystem_t *fs);
 
@@ -52,3 +46,6 @@ bool remove_from_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name);
 
 //Rozdělí cestu na rodičovský inode a jméno souboru/adresáře
 bool split_path(filesystem_t *fs, const char *path, int32_t *out_parent_inode, char *out_name);
+
+//Pomocná funkce pro výpis clusteru
+void print_clusters(int32_t *pointers, int limit, const char *prefix);

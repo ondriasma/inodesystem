@@ -23,18 +23,6 @@ bool write_bytes(filesystem_t *fs, int32_t offset, const void *buffer, size_t si
     return true;
 }
 
-bool read_cluster(filesystem_t *fs, int32_t cluster_num, void *buffer) {
-    int32_t offset = fs->sb.data_start + cluster_num * fs->sb.cluster_size;
-    return read_bytes(fs, offset, buffer, fs->sb.cluster_size);
-}
-
-bool write_cluster(filesystem_t *fs, int32_t cluster_num, const void *buffer) {
-    int32_t offset = fs->sb.data_start + cluster_num * fs->sb.cluster_size;
-    return write_bytes(fs, offset, buffer, fs->sb.cluster_size);
-}
-
-
-
 
 bool load_superblock(filesystem_t *fs) {
     return read_bytes(fs, 0, &fs->sb, sizeof(superblock_t));
@@ -43,8 +31,6 @@ bool load_superblock(filesystem_t *fs) {
 bool save_superblock(filesystem_t *fs) {
     return write_bytes(fs, 0, &fs->sb, sizeof(superblock_t));
 }
-
-
 
 
 void load_bitmaps(filesystem_t *fs) {
@@ -149,8 +135,8 @@ int32_t find_in_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name) {
         }
         
         read_cluster(fs, cluster, entries);
-        
         printf("[DEBUG] Reading cluster %d, checking entries:\n", cluster);
+        //procházení položek v clusteru a hledání shody
         for (int j = 0; j < ENTRIES_PER_CLUSTER; j++) {
             if (entries[j].inode != 0) {
                 printf("[DEBUG]   Entry %d: name='%s', inode=%d\n", 
@@ -232,18 +218,17 @@ int32_t resolve_path(filesystem_t *fs, const char *path) {
     strncpy(path_copy, path, sizeof(path_copy) - 1);
     path_copy[sizeof(path_copy) - 1] = '\0';
     
-    // Skip leading slash if present
+    //přeskočí počáteční lomítko u absolutní cesty
     char *p = path_copy;
     if (*p == '/') p++;
     
-    // Tokenize by '/'
+    
     char *token = strtok(p, "/");
     while (token) {
         printf("[DEBUG]   Processing token: '%s' (current inode: %d)\n", token, current);
         
         //"." -> stejná složka
         if (strcmp(token, ".") == 0) {
-            // Stay in current directory
             token = strtok(NULL, "/");
             continue;
         }
@@ -252,12 +237,12 @@ int32_t resolve_path(filesystem_t *fs, const char *path) {
         if (strcmp(token, "..") == 0) {
             inode_t node;
             if (!read_inode(fs, current, &node)) return -1;
-            current = node.parent; // Directly move to parent
+            current = node.parent;
             token = strtok(NULL, "/");
             continue;
         }
         
-        // Regular name - look it up
+        //nalezení další složky v cestě
         int32_t next = find_in_dir(fs, current, token);
         if (next < 0) {
             printf("[DEBUG]   Not found: '%s'\n", token);
@@ -296,8 +281,6 @@ void update_path(char *current_path, const char *input) {
 }
 
 
-
-// Add to filesystem.c
 bool remove_from_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name) {
     inode_t dir_inode;
     if (!read_inode(fs, dir_inode_id, &dir_inode)) return false;
@@ -313,9 +296,10 @@ bool remove_from_dir(filesystem_t *fs, int32_t dir_inode_id, const char *name) {
         
         for (int j = 0; j < ENTRIES_PER_CLUSTER; j++) {
             if (entries[j].inode != 0 && strcmp(entries[j].name, name) == 0) {
-                // Found it - zero it out
+                //Nalezení správného vstupu a jeho vymazání
                 entries[j].inode = 0;
                 memset(entries[j].name, 0, NAME_SIZE);
+                //zápis změněného clusteru do paměti
                 write_cluster(fs, cluster, entries);
                 return true;
             }
@@ -355,4 +339,26 @@ bool split_path(filesystem_t *fs, const char *path, int32_t *parent_inode, char 
     }
     filename[NAME_SIZE - 1] = '\0';
     return true;
+}
+
+
+
+
+void print_clusters(int32_t *pointers, int limit, const char *prefix) {
+    int total = 0;
+    bool first = true;
+    
+    printf("%s", prefix);//výpis předaného prefixu a clusterů, počet dán arhumentem limit
+    for (int i = 0; i < (int32_t)PTRS_PER_CLUSTER && pointers[i] > 0; i++) {
+        if (total < limit) {
+            if (!first) printf(", ");
+            printf("%d", pointers[i]);
+            first = false;
+        }
+        total++;
+    }
+    
+    if (total == 0) printf("žádné");
+    else if (total > limit) printf(", ... (%d dalších)", total - limit);
+    printf("\n");
 }

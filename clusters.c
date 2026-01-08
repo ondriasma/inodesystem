@@ -35,6 +35,16 @@ void free_cluster(filesystem_t *fs, int32_t cluster) {
 }
 
 
+bool read_cluster(filesystem_t *fs, int32_t cluster_num, void *buffer) {
+    int32_t offset = fs->sb.data_start + cluster_num * fs->sb.cluster_size;
+    return read_bytes(fs, offset, buffer, fs->sb.cluster_size);
+}
+
+bool write_cluster(filesystem_t *fs, int32_t cluster_num, const void *buffer) {
+    int32_t offset = fs->sb.data_start + cluster_num * fs->sb.cluster_size;
+    return write_bytes(fs, offset, buffer, fs->sb.cluster_size);
+}
+
 
 int32_t get_file_cluster(filesystem_t *fs, inode_t *inode, int32_t cluster_index) {
     if (cluster_index == 0 && inode->direct1) return inode->direct1;
@@ -47,7 +57,7 @@ int32_t get_file_cluster(filesystem_t *fs, inode_t *inode, int32_t cluster_index
     cluster_index -= DIRECT_LINKS;
     
     //Nepřímé bloky
-    if (cluster_index < PTRS_PER_CLUSTER && inode->indirect1) {
+    if (cluster_index < (int32_t)PTRS_PER_CLUSTER && inode->indirect1) {
         int32_t pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, inode->indirect1, pointers);
         return pointers[cluster_index];
@@ -64,7 +74,7 @@ int32_t get_file_cluster(filesystem_t *fs, inode_t *inode, int32_t cluster_index
     int32_t l1_index = cluster_index / PTRS_PER_CLUSTER;//kolikátý l2 blok hledáme
     int32_t l2_index = cluster_index % PTRS_PER_CLUSTER;//pozice v něm
 
-    if (l1_index >= PTRS_PER_CLUSTER || l1_pointers[l1_index] == 0) return 0;
+    if (l1_index >= (int32_t)PTRS_PER_CLUSTER || l1_pointers[l1_index] == 0) return 0;
 
     int32_t l2_pointers[PTRS_PER_CLUSTER];
     read_cluster(fs, l1_pointers[l1_index], l2_pointers);
@@ -105,7 +115,7 @@ int set_file_cluster(filesystem_t *fs, inode_t *inode, int32_t cluster_index, in
     cluster_index -= DIRECT_LINKS;
     
     // Nepřímé bloky
-    if (cluster_index < PTRS_PER_CLUSTER) {
+    if (cluster_index < (int32_t)PTRS_PER_CLUSTER) {
         if (inode->indirect1 == 0) {
             inode->indirect1 = alloc_cluster(fs);
             if (inode->indirect1 < 0) return -1;

@@ -48,7 +48,7 @@ bool ls(filesystem_t *fs, const char *path) {
         if (cluster == 0) continue;
         
         read_cluster(fs, cluster, entries);
-        for (int j = 0; j < ENTRIES_PER_CLUSTER; j++) {
+        for (int j = 0; j < (int32_t)ENTRIES_PER_CLUSTER; j++) {
             if (entries[j].inode != 0) {
                 inode_t entry_inode;
                 read_inode(fs, entries[j].inode, &entry_inode);
@@ -93,7 +93,7 @@ bool mkdir(filesystem_t *fs, const char *name) {
 
     printf("[DEBUG] add_to_dir completed successfully\n");
     
-    // Verify it was added by reading back the parent directory TODO smazat
+    //TODO smazat
     inode_t parent;
     read_inode(fs, fs->current_inode, &parent);
     printf("[DEBUG] Parent dir inode %d now has size: %d bytes\n", 
@@ -443,72 +443,32 @@ bool info(filesystem_t *fs, const char *path) {
 // Výpis veškerých informací o souboru
     printf("%s - Velikost: %d B - i-node %d - ", filename, inode.file_size, inode_id);
     
-    bool has_direct = false;
-    printf("přímé odkazy: ");
-    if (inode.direct1 > 0) { printf("%d", inode.direct1); has_direct = true; }
-    if (inode.direct2 > 0) { printf(", %d", inode.direct2); has_direct = true; }
-    if (inode.direct3 > 0) { printf(", %d", inode.direct3); has_direct = true; }
-    if (inode.direct4 > 0) { printf(", %d", inode.direct4); has_direct = true; }
-    if (inode.direct5 > 0) { printf(", %d", inode.direct5); has_direct = true; }
-    
-    if (!has_direct) {
-        printf("žádné");
-    }
-    
+    printf("Přímé odkazy: %d, %d, %d, %d, %d\n", 
+           inode.direct1, inode.direct2, inode.direct3, inode.direct4, inode.direct5);
+
+    //nepřímé odkazy (u každého bloku vypíšeme prvních 10 clusterů)
     if (inode.indirect1 > 0) {
-        printf("1. Nepřímý blok: %d\n", inode.indirect1);
-        printf("  -> Clustery: ");
-        
         int32_t pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, inode.indirect1, pointers);
-        
-        bool first = true;
-        int count = 0;
-        for (int i = 0; i < PTRS_PER_CLUSTER && count < 10; i++) {  // Show first 10
-            if (pointers[i] > 0) {
-                if (!first) printf(", ");
-                printf("%d", pointers[i]);
-                first = false;
-                count++;
-            } else {
-                break;  // Stop at first zero
-            }
-        }
-        
-        // Count total
-        int total = 0;
-        for (int i = 0; i < PTRS_PER_CLUSTER; i++) {
-            if (pointers[i] > 0) total++;
-            else break;
-        }
-        
-        if (total > 10) {
-            printf(", ... (%d dalších)", total - 10);
-        }
-        printf("\n");
+        print_clusters(pointers, 10, "1. Nepřímý blok: ");
     }
-    
+
+    // 2.nepřímé odkazy
     if (inode.indirect2 > 0) {
         printf("2. Nepřímý blok: %d\n", inode.indirect2);
         int32_t l1_pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, inode.indirect2, l1_pointers);
-        for (int i = 0; i < PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
-            printf("  -> L1 blok [%d]: %d\n     -> Clustery: ", i, l1_pointers[i]);
+
+        for (int i = 0; i < 5 && l1_pointers[i] > 0; i++) { //pouze prvních pět bloků
             int32_t l2_pointers[PTRS_PER_CLUSTER];
             read_cluster(fs, l1_pointers[i], l2_pointers);
             
-            bool first = true;
-            for (int j = 0; j < PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
-                if (!first) printf(", ");
-                printf("%d", l2_pointers[j]);
-                first = false;
-            }
-            printf("\n");
+            char prefix[50];
+            sprintf(prefix, "  -> L1 [%d] (%d): ", i, l1_pointers[i]);
+            print_clusters(l2_pointers, 10, prefix);
         }
-
     }
     
-    printf("\n");
     return true;
 }
 
@@ -657,8 +617,9 @@ bool rm(filesystem_t *fs, const char *path) {
         return false;
     }
     
+    
+    //int32_t clusters_needed = (file_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
     //Uvolnění clusteru a všech obsazených datových bloků
-    int32_t clusters_needed = (file_inode.file_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
     
     if (file_inode.direct1 > 0) free_cluster(fs, file_inode.direct1);
     if (file_inode.direct2 > 0) free_cluster(fs, file_inode.direct2);
@@ -672,7 +633,7 @@ bool rm(filesystem_t *fs, const char *path) {
         int32_t pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, file_inode.indirect1, pointers);
         
-        for (int i = 0; i < PTRS_PER_CLUSTER && pointers[i] > 0; i++) {
+        for (int i = 0; i < (int32_t)PTRS_PER_CLUSTER && pointers[i] > 0; i++) {
             free_cluster(fs, pointers[i]);
         }
         
@@ -685,12 +646,12 @@ bool rm(filesystem_t *fs, const char *path) {
         int32_t l1_pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, file_inode.indirect2, l1_pointers);
         
-        for (int i = 0; i < PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
+        for (int i = 0; i < (int32_t)PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
 
             int32_t l2_pointers[PTRS_PER_CLUSTER];
             read_cluster(fs, l1_pointers[i], l2_pointers);
             
-            for (int j = 0; j < PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
+            for (int j = 0; j < (int32_t)PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
                 free_cluster(fs, l2_pointers[j]);
             }
             
@@ -765,10 +726,9 @@ bool rmdir(filesystem_t *fs, const char *path) {
     for (int32_t i = 0; i < cluster_count; i++) {
         int32_t cluster = get_file_cluster(fs, &dir_inode, i);
         if (cluster == 0) continue;
-        
         read_cluster(fs, cluster, entries);
         
-        for (int j = 0; j < ENTRIES_PER_CLUSTER; j++) {
+        for (int j = 0; j < (int32_t)ENTRIES_PER_CLUSTER; j++) {
             if (entries[j].inode != 0) {
                 //Složka není prázdná
                 printf("ERROR - DIRECTORY IS NOT EMPTY\n");
@@ -787,12 +747,7 @@ bool rmdir(filesystem_t *fs, const char *path) {
 
     clear_bit(fs->inode_bitmap, dir_inode_id);
     save_bitmaps(fs);
-    
-    //odstranění záznamu - zjištění jména a nadřazeného adresáře
-    //char path_copy[256];
-    //strncpy(path_copy, path, sizeof(path_copy) - 1);
-    //path_copy[sizeof(path_copy) - 1] = '\0';
-    
+
     
     int32_t parent_inode;
     char dirname[NAME_SIZE];
@@ -823,7 +778,7 @@ bool mv(filesystem_t *fs, const char *src_path, const char *dest_path) {
     }
 
     src_id = find_in_dir(fs, src_parent, src_name);
-    if (src_id <= 0) { // Protect root
+    if (src_id <= 0) {
         printf("FILE NOT FOUND\n");
         return false;
     }
@@ -961,7 +916,7 @@ bool load(filesystem_t *fs, const char *filename) {
             continue;
         }
         
-        // Parse command and arguments
+        // načtení příkazů a jejich argumentů
         char cmd[64] = {0}, arg1[256] = {0}, arg2[256] = {0}, arg3[256] = {0};
         sscanf(line, "%s %s %s %s", cmd, arg1, arg2, arg3);
         
@@ -1184,8 +1139,8 @@ bool xcp(filesystem_t *fs, const char *f1, const char *f2, const char *f3) {
         }
         
         int32_t offset = i * fs->sb.cluster_size;
-        int32_t to_write = (total_size - offset > fs->sb.cluster_size) ? 
-                          fs->sb.cluster_size : total_size - offset;
+        int32_t to_write = (total_size - offset > fs->sb.cluster_size) ? //celý cluster
+                          fs->sb.cluster_size : total_size - offset;    //poslední cluster
         
         memset(buffer, 0, CLUSTER_SIZE);
         memcpy(buffer, final_data + offset, to_write);
@@ -1268,9 +1223,9 @@ bool add(filesystem_t *fs, const char *f1, const char *f2) {
         
         int32_t bytes_to_copy = f2_inode.file_size - bytes_read;
         if (bytes_to_copy > fs->sb.cluster_size) {
-            bytes_to_copy = fs->sb.cluster_size;
+            bytes_to_copy = fs->sb.cluster_size;//poslední cluster
         }
-        
+        //kopírování do bufferu
         memcpy(f2_data + bytes_read, buffer, bytes_to_copy);
         bytes_read += bytes_to_copy;
     }
@@ -1326,7 +1281,7 @@ bool add(filesystem_t *fs, const char *f1, const char *f2) {
     if (f2_inode.indirect1 > 0) {
         int32_t pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, f2_inode.indirect1, pointers);
-        for (int i = 0; i < PTRS_PER_CLUSTER && pointers[i] > 0; i++) {
+        for (int i = 0; i < (int32_t)PTRS_PER_CLUSTER && pointers[i] > 0; i++) {
             free_cluster(fs, pointers[i]);
         }
         free_cluster(fs, f2_inode.indirect1);
@@ -1336,11 +1291,11 @@ bool add(filesystem_t *fs, const char *f1, const char *f2) {
         int32_t l1_pointers[PTRS_PER_CLUSTER];
         read_cluster(fs, f2_inode.indirect2, l1_pointers);
         
-        for (int i = 0; i < PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
+        for (int i = 0; i < (int32_t)PTRS_PER_CLUSTER && l1_pointers[i] > 0; i++) {
             int32_t l2_pointers[PTRS_PER_CLUSTER];
             read_cluster(fs, l1_pointers[i], l2_pointers);
             
-            for (int j = 0; j < PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
+            for (int j = 0; j < (int32_t)PTRS_PER_CLUSTER && l2_pointers[j] > 0; j++) {
                 free_cluster(fs, l2_pointers[j]);
             }
             
@@ -1362,6 +1317,7 @@ bool add(filesystem_t *fs, const char *f1, const char *f2) {
     //Zápis nových dat - spojených souborů
     clusters_needed = (new_size + fs->sb.cluster_size - 1) / fs->sb.cluster_size;
     
+    //postupný zápis do všech clusterů
     for (int32_t i = 0; i < clusters_needed; i++) {
         int32_t cluster = alloc_cluster(fs);
         if (cluster < 0) {
@@ -1371,8 +1327,8 @@ bool add(filesystem_t *fs, const char *f1, const char *f2) {
         }
         
         int32_t offset = i * fs->sb.cluster_size;
-        int32_t to_write = (new_size - offset > fs->sb.cluster_size) ? 
-                          fs->sb.cluster_size : new_size - offset;
+        int32_t to_write = (new_size - offset > fs->sb.cluster_size) ?  //využije se celý cluster
+                          fs->sb.cluster_size : new_size - offset;  //poslední cluster
         
         memset(buffer, 0, CLUSTER_SIZE);
         memcpy(buffer, combined_data + offset, to_write);
